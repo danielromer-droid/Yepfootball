@@ -1,21 +1,74 @@
-const LEAGUES={
- UCL:{name:'Champions League',espn:'uefa.champions'},EPL:{name:'Premier League',espn:'eng.1'},LL:{name:'La Liga',espn:'esp.1'},SA:{name:'Serie A',espn:'ita.1'},BL:{name:'Bundesliga',espn:'ger.1'},L1:{name:'Ligue 1',espn:'fra.1'}
-};
-const NEWS_QUERIES={
- UCL:'Champions League football',EPL:'Premier League football',LL:'La Liga football',SA:'Serie A football',BL:'Bundesliga football',L1:'Ligue 1 football'
-};
-const json=(data,status=200,headers={})=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...headers}});
-const iso=d=>d.toISOString().slice(0,10).replaceAll('-','');
-const date=(off=0)=>{const d=new Date();d.setUTCDate(d.getUTCDate()+off);return d;};
-async function espn(league,from,to){
- const url=`https://site.api.espn.com/apis/site/v2/sports/soccer/${league.espn}/scoreboard?dates=${iso(from)}-${iso(to)}`;
- const r=await fetch(url,{headers:{'user-agent':'YepFootball/3.0'}});if(!r.ok)throw new Error('score feed '+r.status);const j=await r.json();
- return (j.events||[]).map(ev=>{const c=ev.competitions?.[0],h=c?.competitors?.find(x=>x.homeAway==='home'),a=c?.competitors?.find(x=>x.homeAway==='away'),s=ev.status?.type||{};const live=s.state==='in';return {id:String(ev.id),league:Object.keys(LEAGUES).find(k=>LEAGUES[k].espn===league.espn),comp:league.name,home:h?.team?.displayName||'Home',away:a?.team?.displayName||'Away',hs:h?.score??'—',as:a?.score??'—',date:ev.date,status:live?(ev.status.displayClock?`LIVE ${ev.status.displayClock}`:'LIVE'):s.completed?'FT':new Date(ev.date).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}),live,completed:!!s.completed};}).filter(x=>x.home&&x.away);
+const ESPN = "https://site.api.espn.com/apis/site/v2/sports/soccer";
+const LEAGUES = ["uefa.champions","eng.1","esp.1","ita.1","ger.1","fra.1"];
+const NEWS_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/news";
+
+function json(data, maxAge=120) {
+  return new Response(JSON.stringify(data), {
+    headers: {"content-type":"application/json; charset=utf-8","cache-control":`public, max-age=${maxAge}`}
+  });
 }
-async function allGames(from,to){const arr=await Promise.all(Object.values(LEAGUES).map(l=>espn(l,from,to).catch(()=>[])));return arr.flat().sort((a,b)=>new Date(a.date)-new Date(b.date));}
-function strip(html){return html.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();}
-function parseRSS(xml,source,league){const out=[];for(const m of xml.matchAll(/<item[\s\S]*?<\/item>/gi)){const x=m[0];const title=(x.match(/<title>([\s\S]*?)<\/title>/i)||[])[1];const link=(x.match(/<link>([\s\S]*?)<\/link>/i)||[])[1];const desc=(x.match(/<description>([\s\S]*?)<\/description>/i)||[])[1];const pub=(x.match(/<pubDate>([\s\S]*?)<\/pubDate>/i)||[])[1];if(title&&link)out.push({title:strip(title.replace(/<!\[CDATA\[|\]\]>/g,'')),url:strip(link),summary:strip((desc||'').replace(/<!\[CDATA\[|\]\]>/g,'' )).slice(0,180),date:pub?new Date(strip(pub)).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}):'Today',source,league});}return out;}
+async function fetchJSON(url, cacheSeconds=120) {
+  const cache = caches.default;
+  const req = new Request(url, {method:"GET"});
+  let hit = await cache.match(req);
+  if (hit) return hit.json();
+  const res = await fetch(req, {cf:{cacheTtl:cacheSeconds, cacheEverything:true}});
+  if (!res.ok) throw new Error(`Upstream ${res.status}`);
+  const data = await res.json();
+  await cache.put(req, new Response(JSON.stringify(data), {headers:{"content-type":"application/json","cache-control":`public,max-age=${cacheSeconds}`}}));
+  return data;
+}
+async function scores(league) {
+  const paths = league ? [league] : LEAGUES;
+  const chunks = await Promise.all(paths.map(async p=>{
+    try {
+      const d = await fetchJSON(`${ESPN}/${p}/scoreboard`, 120);
+      return (d.events||[]).map(e=>({...e, league:d.leagues?.[0]?.name||p}));
+    } catch { return []; }
+  }));
+  return {events:chunks.flat().sort((a,b)=>new Date(a.date)-new Date(b.date)), updated:new Date().toISOString()};
+}
+async function fixtures() {
+  const now=new Date(), dates=[];
+  for(let i=0;i<7;i++){const d=new Date(now);d.setUTCDate(d.getUTCDate()+i);dates.push(d.toISOString().slice(0,10).replaceAll("-",""))}
+  const out=[];
+  for(const p of LEAGUES){
+    for(const day of dates){
+      try{
+        const d=await fetchJSON(`${ESPN}/${p}/scoreboard?dates=${day}`, 900);
+        for(const e of d.events||[]) if(new Date(e.date)>=now) out.push({...e,league:d.leagues?.[0]?.name||p});
+      }catch{}
+    }
+  }
+  const seen=new Set(); const events=out.filter(e=>!seen.has(e.id)&&(seen.add(e.id),true)).sort((a,b)=>new Date(a.date)-new Date(b.date)).slice(0,60);
+  return {events,updated:new Date().toISOString()};
+}
 async function news(){
- const feeds=Object.entries(NEWS_QUERIES).map(async([key,q])=>{const u='https://news.google.com/rss/search?q='+encodeURIComponent(q)+'&hl=en-GB&gl=GB&ceid=GB:en';try{const r=await fetch(u,{headers:{'user-agent':'YepFootball/3.0'}});return r.ok?parseRSS(await r.text(),'Google News',LEAGUES[key].name):[];}catch{return[];}});const all=(await Promise.all(feeds)).flat();const seen=new Set();return all.filter(x=>{const k=x.title.toLowerCase();if(seen.has(k))return false;seen.add(k);return true;}).sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,12);
+  const d=await fetchJSON(NEWS_URL, 1800);
+  const articles=(d.articles||[]).map(a=>({title:a.headline||a.title,link:a.links?.web?.href||a.links?.mobile?.href,source:a.source?.description||a.source?.name,published:a.published||a.lastModified})).filter(a=>a.title&&a.link);
+  return {articles,updated:new Date().toISOString()};
 }
-export default {async fetch(request,env,ctx){const url=new URL(request.url);try{if(url.pathname==='/api/scores'){const games=await allGames(date(0),date(1));return json({updatedAt:new Date().toISOString(),games});}if(url.pathname==='/api/fixtures'){const games=await allGames(date(0),date(7));return json({updatedAt:new Date().toISOString(),fixtures:games.filter(x=>!x.completed)});}if(url.pathname==='/api/news'){return json({updatedAt:new Date().toISOString(),items:await news()});}return env.ASSETS.fetch(request);}catch(e){return json({error:'temporary feed error',message:e.message},502);}},async scheduled(controller,env,ctx){ctx.waitUntil((async()=>{try{await Promise.all([allGames(date(0),date(1)),allGames(date(0),date(7)),news()]);}catch(e){console.log('scheduled refresh failed',e.message);}})());}};
+async function handle(req){
+  const u=new URL(req.url);
+  try{
+    if(u.pathname==="/api/scores") return json(await scores(u.searchParams.get("league")),120);
+    if(u.pathname==="/api/fixtures") return json(await fixtures(),900);
+    if(u.pathname==="/api/news") return json(await news(),1800);
+  }catch(e){return json({error:"Data feed temporarily unavailable",detail:e.message},30)}
+  return null;
+}
+export default {
+  async fetch(request, env, ctx) {
+    const api=await handle(request); if(api) return api;
+    return env.ASSETS.fetch(request);
+  },
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil((async()=>{
+      await Promise.allSettled([
+        scores(),
+        fixtures(),
+        news()
+      ]);
+    })());
+  }
+};

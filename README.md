@@ -1,21 +1,28 @@
-# YepFootball v3
+# YepFootball V3.1
 
-Cloudflare Workers + Static Assets version.
+Cloudflare Workers + Static Assets version for **yepfootball.com**.
 
-## What is new
-- Correct YepFootball branding everywhere.
-- Server-side `/api/scores`, `/api/fixtures`, and `/api/news` endpoints.
-- Scores/fixtures cover Champions League, Premier League, La Liga, Serie A, Bundesliga and Ligue 1.
-- Scores refresh in the browser every 2 minutes.
-- Cloudflare Cron Trigger runs every 15 minutes to warm the football/news feeds even when nobody is visiting.
-- News is fetched server-side from Google News RSS searches by competition and displayed with source links.
-- Static HTML/CSS/JS are served by the same Worker.
+## V3.1 changes
+- Correct YepFootball branding.
+- Live score endpoint covering Champions League, Premier League, La Liga, Serie A, Bundesliga and Ligue 1.
+- Upcoming fixtures endpoint for the next 7 days.
+- Automatic European football news feed.
+- Browser score refresh every 2 minutes.
+- Fixtures refresh every 15 minutes.
+- News refresh every 30 minutes.
+- Cloudflare Cron runs every 15 minutes to warm the data feeds.
+- No API key is required for the included ESPN public data endpoints.
 
-## Deploying to an existing Cloudflare Worker
-This package is intended for Cloudflare Workers with Static Assets, not Pages Direct Upload.
-If using Wrangler: `npx wrangler deploy` from this folder.
-If using the Cloudflare dashboard, use the Worker code editor / deploy flow and make sure the Worker has Static Assets configured with `public/` as its assets directory and the Cron Trigger is `*/15 * * * *`.
+## Deploy
+This repository is intended to be connected to the existing Cloudflare Worker:
+
+`falling-morning-0e00`
+
+Cloudflare Workers Builds:
+- Build command: blank / None
+- Deploy command: `npx wrangler deploy`
+- Root directory: `/`
+- Production branch: `main`
 
 ## Important
-The site currently uses ESPN's public scoreboard endpoints for scores/fixtures and Google News RSS for news, so no API key is required in this version. For a commercial/high-volume product, consider moving to a licensed football-data/news provider and respecting their terms/rate limits.
-YepFootball V3 - automatic deployment enabled.
+The upstream football feed is a public ESPN endpoint and can change without notice. For a production commercial service, replace it with a licensed football-data provider and follow that provider's terms.

@@ -1,20 +1,48 @@
-const LEAGUES={UCL:'Champions League',EPL:'Premier League',LL:'La Liga',SA:'Serie A',BL:'Bundesliga',L1:'Ligue 1'};
-let scores=[];
+const leagues = {
+  all:{name:"All Europe", path:null},
+  ucl:{name:"Champions League", path:"uefa.champions"},
+  epl:{name:"Premier League", path:"eng.1"},
+  laliga:{name:"La Liga", path:"esp.1"},
+  seriea:{name:"Serie A", path:"ita.1"},
+  bundesliga:{name:"Bundesliga", path:"ger.1"},
+  ligue1:{name:"Ligue 1", path:"fra.1"}
+};
+let selected="all";
 const $=s=>document.querySelector(s);
-const fmtTime=d=>new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit'}).format(new Date(d));
-const fmtDate=d=>new Intl.DateTimeFormat('en-GB',{weekday:'short',day:'2-digit',month:'short'}).format(new Date(d)).toUpperCase();
-function esc(s){return String(s??'').replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]));}
-function renderScores(filter='all'){
- const list=filter==='all'?scores:scores.filter(x=>x.league===filter);
- $('#score-grid').innerHTML=list.length?list.slice(0,24).map(x=>`<article class="score-card"><div class="comp">${esc(x.comp)}<span class="status ${x.live?'is-live':''}">${esc(x.status)}</span></div><div class="score-teams"><div class="score-team"><span>${esc(x.home)}</span><b>${esc(x.hs)}</b></div><div class="score-team"><span>${esc(x.away)}</span><b>${esc(x.as)}</b></div></div></article>`).join(''):`<div class="empty">No matches for this competition in the selected live window.</div>`;
- const hero=scores.find(x=>x.live)||scores.find(x=>x.completed)||scores[0];
- if(hero){$('#hero-home-name').textContent=hero.home;$('#hero-away-name').textContent=hero.away;$('#hero-home').textContent=hero.home.slice(0,3).toUpperCase();$('#hero-away').textContent=hero.away.slice(0,3).toUpperCase();$('#hero-score').innerHTML=`${hero.hs} <small>–</small> ${hero.as}`;$('#hero-status').textContent=hero.live?hero.status:`${hero.comp} • ${hero.status}`;}
+const dateKey=d=>d.toISOString().slice(0,10).replaceAll("-","");
+function tabs(){
+  $("#league-tabs").innerHTML=Object.entries(leagues).map(([k,v])=>`<button class="tab ${k===selected?"active":""}" data-league="${k}">${v.name}</button>`).join("");
+  document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{selected=b.dataset.league;tabs();loadScores()});
 }
-async function getJSON(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error(await r.text());return r.json();}
-async function load(){
- try{const data=await getJSON('/api/scores');scores=data.games||[];renderScores($('.filter.active')?.dataset.league||'all');const t=new Date(data.updatedAt||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});$('#updated').textContent=`Updated ${t}`;$('#updated').classList.add('ok');$('#last-sync').textContent=`Scores & fixtures synced ${t}`;}catch(e){$('#updated').textContent='Live feed unavailable';$('#updated').classList.add('err');}
- try{const f=await getJSON('/api/fixtures');const list=f.fixtures||[];$('#fixture-list').innerHTML=list.length?list.slice(0,40).map(x=>`<div class="fixture"><div class="fixture-date">${fmtDate(x.date)}<br><strong>${fmtTime(x.date)}</strong></div><div class="fixture-teams">${esc(x.home)} — ${esc(x.away)}</div><div class="fixture-comp">${esc(x.comp)}<span class="league-tag">${esc(x.league)}</span></div></div>`).join(''):`<div class="empty">No upcoming fixtures found.</div>`: '<div class="empty">Fixtures temporarily unavailable.</div>'; }catch(e){$('#fixture-list').innerHTML='<div class="empty">Fixtures temporarily unavailable. Refresh to try again.</div>';}
- try{const n=await getJSON('/api/news');$('#news-grid').innerHTML=(n.items||[]).slice(0,6).map((x,i)=>`<article class="news-card ${i===0?'featured':''}"><div class="news-image n${(i%3)+1}"><span>${esc(x.league||'EUROPE')}</span></div><div class="news-body"><div class="meta">${esc(x.date||'TODAY')} • ${esc(x.source||'FOOTBALL')}</div><h3>${esc(x.title)}</h3><p>${esc(x.summary||'Latest European football news.')}</p><a class="news-source" href="${esc(x.url)}" target="_blank" rel="noopener">Read source ↗</a></div></article>`).join('')||'<div class="empty">No news available right now.</div>';$('#news-updated').textContent=`Updated ${new Date(n.updatedAt||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;}catch(e){$('#news-grid').innerHTML='<div class="empty">News feed temporarily unavailable.</div>';$('#news-updated').textContent='Unavailable';}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function fmtDate(v){try{return new Date(v).toLocaleString(undefined,{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}catch{return v}}
+async function getJSON(url){const r=await fetch(url,{headers:{"Accept":"application/json"}});if(!r.ok)throw Error(`HTTP ${r.status}`);return r.json()}
+function eventCard(e){
+  const c=e.competitions?.[0], a=c?.competitors?.find(x=>x.homeAway==="home"), b=c?.competitors?.find(x=>x.homeAway==="away");
+  const state=e.status?.type?.shortDetail||e.status?.type?.detail||"Scheduled";
+  const live=e.status?.type?.state==="in";
+  return `<article class="score-card"><div class="score-meta"><span>${esc(e.league||"Football")}</span><span class="${live?"live":""}">${esc(state)}</span></div><div class="teams"><span>${esc(a?.team?.shortDisplayName||a?.team?.displayName||"Home")}</span><strong class="score">${a?.score??"-"} — ${b?.score??"-"}</strong><span>${esc(b?.team?.shortDisplayName||b?.team?.displayName||"Away")}</span></div></article>`
 }
-document.querySelectorAll('.filter').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderScores(b.dataset.league);}));
-$('#refresh-data')?.addEventListener('click',load);load();setInterval(load,120000);
+function fixtureCard(e){
+  const c=e.competitions?.[0], a=c?.competitors?.find(x=>x.homeAway==="home"), b=c?.competitors?.find(x=>x.homeAway==="away");
+  return `<article class="fixture-card"><div class="fixture-date">${fmtDate(e.date)}</div><div class="fixture-teams">${esc(a?.team?.displayName||"Home")}<br>vs<br>${esc(b?.team?.displayName||"Away")}</div><div class="fixture-league">${esc(e.league||"European football")}</div></article>`
+}
+async function loadScores(){
+  $("#scores-status").textContent="Loading…";
+  try{
+    const q=selected==="all"?"/api/scores":`/api/scores?league=${encodeURIComponent(leagues[selected].path)}`;
+    const data=await getJSON(q);
+    const events=data.events||[];
+    $("#scores-grid").innerHTML=events.length?events.map(eventCard).join(""):`<div class="empty">No matches found for this competition today.</div>`;
+    $("#scores-status").textContent=`Updated ${new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`;
+  }catch(e){$("#scores-grid").innerHTML=`<div class="empty">Scores are temporarily unavailable. Please try again shortly.</div>`;$("#scores-status").textContent="Feed unavailable"}
+}
+async function loadFixtures(){
+  try{const data=await getJSON("/api/fixtures");const events=data.events||[];$("#fixtures-grid").innerHTML=events.length?events.map(fixtureCard).join(""):`<div class="empty">No upcoming fixtures found.</div>`}
+  catch(e){$("#fixtures-grid").innerHTML=`<div class="empty">Fixtures are temporarily unavailable.</div>`}
+}
+async function loadNews(){
+  try{const data=await getJSON("/api/news");const items=data.articles||[];$("#news-grid").innerHTML=items.length?items.slice(0,9).map(n=>`<a class="news-card" href="${esc(n.link)}" target="_blank" rel="noopener"><div><small>${esc(n.source||"Football news")}</small><h3>${esc(n.title)}</h3></div><span class="source">${n.published?fmtDate(n.published):"Latest"}</span></a>`).join(""):`<div class="empty">No news available right now.</div>`}
+  catch(e){$("#news-grid").innerHTML=`<div class="empty">News feed is temporarily unavailable.</div>`}
+}
+document.addEventListener("DOMContentLoaded",()=>{tabs();$("#year").textContent=new Date().getFullYear();loadScores();loadFixtures();loadNews();$("#updated").textContent=`Last checked ${new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}`;setInterval(loadScores,120000);setInterval(loadFixtures,900000);setInterval(loadNews,1800000)})
