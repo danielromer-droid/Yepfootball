@@ -18,3 +18,4 @@ If using the Cloudflare dashboard, use the Worker code editor / deploy flow and 
 
 ## Important
 The site currently uses ESPN's public scoreboard endpoints for scores/fixtures and Google News RSS for news, so no API key is required in this version. For a commercial/high-volume product, consider moving to a licensed football-data/news provider and respecting their terms/rate limits.
+YepFootball V3 - automatic deployment enabled.
