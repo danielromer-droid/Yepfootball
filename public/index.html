@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="YepFootball — European football scores, fixtures, news and videos.">
+  <title>YepFootball — European Football</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .brand-word{font-weight:800}.brand-word b{color:#fff}.hero-match .source{font-size:10px;color:#6f7a84;text-align:center;margin-top:8px}.data-badge{display:inline-flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid #29323a;border-radius:999px;font-size:10px;color:#9ca6af}.data-badge i{width:7px;height:7px;border-radius:50%;background:#7cff4f;display:block}.news-source{display:inline-block;margin-top:8px;color:#7cff4f;font-size:11px;font-weight:800}.news-refresh-note{display:flex;justify-content:space-between;gap:15px;align-items:center}.api-note{color:#69747e}.status.is-live{color:#ff6666}.updated.ok{color:#7cff4f}.updated.err{color:#ffb15c}.last-sync{font-size:11px;color:#69747e;margin-top:10px}.fixture-date strong{color:#111}.league-tag{font-size:9px;padding:4px 6px;border-radius:5px;background:#e9eee9;margin-left:7px}.hero-live{display:inline-flex;align-items:center;gap:6px;color:#7cff4f;font-weight:800}.hero-live:before{content:"";width:6px;height:6px;border-radius:50%;background:#7cff4f}.menu{cursor:pointer}
+  </style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#"><span class="brand-mark">YF</span><span class="brand-word">Yep<b>Football</b></span></a>
+  <nav><a href="#scores">Scores</a><a href="#fixtures">Fixtures</a><a href="#news">News</a><a href="#videos">Videos</a></nav>
+  <button class="menu" aria-label="Open menu">☰</button>
+</header>
+<section class="hero">
+  <div class="hero-copy">
+    <div class="eyebrow">EUROPEAN FOOTBALL • 2026/27</div>
+    <h1>Football.<br><em>Everywhere.</em></h1>
+    <p>Live scores, fixtures, daily European football news and the best official videos — in one fast place.</p>
+    <div class="hero-actions"><a class="btn primary" href="#scores">See scores</a><a class="btn ghost" href="#fixtures">Upcoming fixtures</a></div>
+    <div class="last-sync" id="last-sync">Data loading…</div>
+  </div>
+  <div class="hero-match">
+    <div class="match-head"><span>European Match Centre</span><span class="hero-live">LIVE DATA</span></div>
+    <div class="teams"><div><div class="crest" id="hero-home">YF</div><strong id="hero-home-name">YepFootball</strong></div><div class="big-score" id="hero-score">— <small>–</small> —</div><div><div class="crest alt" id="hero-away">EU</div><strong id="hero-away-name">Europe</strong></div></div>
+    <div class="match-status" id="hero-status">CHECKING SCORES</div><div class="match-note">Automatically refreshed from the live football feed</div><div class="source">If no match is live, the latest major result is shown.</div>
+  </div>
+</section>
+<main>
+<section id="scores" class="section">
+  <div class="section-title"><div><span class="kicker">MATCH CENTRE</span><h2>Scores</h2></div><div class="score-tools"><span class="updated" id="updated">Loading…</span><button id="refresh-data" class="refresh">↻ Refresh</button></div></div>
+  <div class="filters">
+    <button class="filter active" data-league="all">All Europe</button><button class="filter" data-league="UCL">Champions League</button><button class="filter" data-league="EPL">Premier League</button><button class="filter" data-league="LL">La Liga</button><button class="filter" data-league="SA">Serie A</button><button class="filter" data-league="BL">Bundesliga</button><button class="filter" data-league="L1">Ligue 1</button>
+  </div>
+  <div id="score-grid" class="score-grid"></div>
+</section>
+<section id="fixtures" class="section light">
+  <div class="section-title"><div><span class="kicker">2026/27 CALENDAR</span><h2>Upcoming fixtures</h2></div><div class="date-chip">Next 7 days • automatic</div></div>
+  <div id="fixture-list" class="fixture-list"></div>
+</section>
+<section id="news" class="section">
+  <div class="section-title"><div><span class="kicker">UPDATED AUTOMATICALLY</span><h2>European football news</h2></div><span class="data-badge"><i></i> Daily feed</span></div>
+  <div class="news-refresh-note"><span class="api-note">News is fetched server-side by Cloudflare and refreshed automatically.</span><span id="news-updated" class="updated">Loading…</span></div>
+  <div id="news-grid" class="news-grid"></div>
+</section>
+<section id="videos" class="section light">
+  <div class="section-title"><div><span class="kicker">WATCH</span><h2>Football videos</h2></div><a class="more" href="https://www.youtube.com/@UEFA" target="_blank" rel="noopener">Official channels ↗</a></div>
+  <div class="video-grid">
+    <a class="video-card" href="https://www.youtube.com/@UEFA" target="_blank" rel="noopener"><div class="video-thumb v1"><span class="play">▶</span></div><div><div class="meta">UEFA • HIGHLIGHTS</div><h3>Champions League highlights</h3></div></a>
+    <a class="video-card" href="https://www.youtube.com/@premierleague" target="_blank" rel="noopener"><div class="video-thumb v2"><span class="play">▶</span></div><div><div class="meta">PREMIER LEAGUE</div><h3>Matchday highlights & features</h3></div></a>
+    <a class="video-card" href="https://www.youtube.com/@LaLigaEN" target="_blank" rel="noopener"><div class="video-thumb v3"><span class="play">▶</span></div><div><div class="meta">LALIGA</div><h3>Goals, skills and best moments</h3></div></a>
+  </div>
+</section>
+<section class="section leagues"><div class="section-title"><div><span class="kicker">FOLLOW EUROPE</span><h2>Top competitions</h2></div></div><div class="league-pills"><span>🇬🇧 Premier League</span><span>🇪🇸 LaLiga</span><span>🇮🇹 Serie A</span><span>🇩🇪 Bundesliga</span><span>🇫🇷 Ligue 1</span><span>🏆 Champions League</span></div></section>
+</main>
+<footer><div class="footer-brand">YepFootball</div><p>European football, simplified.</p><div class="footer-links"><a href="#">About</a><a href="#">Contact</a><a href="#">Privacy</a></div></footer>
+<script src="/app.js"></script>
+</body></html>

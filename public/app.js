@@ -1,0 +1,20 @@
+const LEAGUES={UCL:'Champions League',EPL:'Premier League',LL:'La Liga',SA:'Serie A',BL:'Bundesliga',L1:'Ligue 1'};
+let scores=[];
+const $=s=>document.querySelector(s);
+const fmtTime=d=>new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit'}).format(new Date(d));
+const fmtDate=d=>new Intl.DateTimeFormat('en-GB',{weekday:'short',day:'2-digit',month:'short'}).format(new Date(d)).toUpperCase();
+function esc(s){return String(s??'').replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]));}
+function renderScores(filter='all'){
+ const list=filter==='all'?scores:scores.filter(x=>x.league===filter);
+ $('#score-grid').innerHTML=list.length?list.slice(0,24).map(x=>`<article class="score-card"><div class="comp">${esc(x.comp)}<span class="status ${x.live?'is-live':''}">${esc(x.status)}</span></div><div class="score-teams"><div class="score-team"><span>${esc(x.home)}</span><b>${esc(x.hs)}</b></div><div class="score-team"><span>${esc(x.away)}</span><b>${esc(x.as)}</b></div></div></article>`).join(''):`<div class="empty">No matches for this competition in the selected live window.</div>`;
+ const hero=scores.find(x=>x.live)||scores.find(x=>x.completed)||scores[0];
+ if(hero){$('#hero-home-name').textContent=hero.home;$('#hero-away-name').textContent=hero.away;$('#hero-home').textContent=hero.home.slice(0,3).toUpperCase();$('#hero-away').textContent=hero.away.slice(0,3).toUpperCase();$('#hero-score').innerHTML=`${hero.hs} <small>–</small> ${hero.as}`;$('#hero-status').textContent=hero.live?hero.status:`${hero.comp} • ${hero.status}`;}
+}
+async function getJSON(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error(await r.text());return r.json();}
+async function load(){
+ try{const data=await getJSON('/api/scores');scores=data.games||[];renderScores($('.filter.active')?.dataset.league||'all');const t=new Date(data.updatedAt||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});$('#updated').textContent=`Updated ${t}`;$('#updated').classList.add('ok');$('#last-sync').textContent=`Scores & fixtures synced ${t}`;}catch(e){$('#updated').textContent='Live feed unavailable';$('#updated').classList.add('err');}
+ try{const f=await getJSON('/api/fixtures');const list=f.fixtures||[];$('#fixture-list').innerHTML=list.length?list.slice(0,40).map(x=>`<div class="fixture"><div class="fixture-date">${fmtDate(x.date)}<br><strong>${fmtTime(x.date)}</strong></div><div class="fixture-teams">${esc(x.home)} — ${esc(x.away)}</div><div class="fixture-comp">${esc(x.comp)}<span class="league-tag">${esc(x.league)}</span></div></div>`).join(''):`<div class="empty">No upcoming fixtures found.</div>`: '<div class="empty">Fixtures temporarily unavailable.</div>'; }catch(e){$('#fixture-list').innerHTML='<div class="empty">Fixtures temporarily unavailable. Refresh to try again.</div>';}
+ try{const n=await getJSON('/api/news');$('#news-grid').innerHTML=(n.items||[]).slice(0,6).map((x,i)=>`<article class="news-card ${i===0?'featured':''}"><div class="news-image n${(i%3)+1}"><span>${esc(x.league||'EUROPE')}</span></div><div class="news-body"><div class="meta">${esc(x.date||'TODAY')} • ${esc(x.source||'FOOTBALL')}</div><h3>${esc(x.title)}</h3><p>${esc(x.summary||'Latest European football news.')}</p><a class="news-source" href="${esc(x.url)}" target="_blank" rel="noopener">Read source ↗</a></div></article>`).join('')||'<div class="empty">No news available right now.</div>';$('#news-updated').textContent=`Updated ${new Date(n.updatedAt||Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;}catch(e){$('#news-grid').innerHTML='<div class="empty">News feed temporarily unavailable.</div>';$('#news-updated').textContent='Unavailable';}
+}
+document.querySelectorAll('.filter').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderScores(b.dataset.league);}));
+$('#refresh-data')?.addEventListener('click',load);load();setInterval(load,120000);
