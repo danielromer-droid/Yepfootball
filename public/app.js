@@ -390,14 +390,12 @@ async function loadScores() {
         `Scores updated ${time}`;
 
   } catch (e) {
-
-    $("#scores-grid").innerHTML = `
-      <div class="empty">
-        Scores are temporarily
-        unavailable.
-        Please try again shortly.
-      </div>
-    `;
+    $("#scores-grid").innerHTML =
+      `<div class="empty">
+        Scores API error: ${esc(e.message || String(e))}
+      </div>`;
+    $("#scores-status").textContent = "Feed unavailable";
+    console.error("Scores API error:", e);
 
     $("#scores-status")
       .textContent =
@@ -429,14 +427,11 @@ async function loadFixtures() {
         `;
 
   } catch (e) {
-
-    $("#fixtures-grid")
-      .innerHTML = `
-        <div class="empty">
-          Fixtures are temporarily
-          unavailable.
-        </div>
-      `;
+    $("#fixtures-grid").innerHTML =
+      `<div class="empty">
+        Fixtures API error: ${esc(e.message || String(e))}
+      </div>`;
+    console.error("Fixtures API error:", e);
   }
 }
 
