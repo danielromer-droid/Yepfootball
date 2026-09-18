@@ -156,6 +156,7 @@ async function getJSON(url) {
       }
     );
 
+
   if (!response.ok) {
 
     throw new Error(
@@ -164,7 +165,38 @@ async function getJSON(url) {
 
   }
 
+
   return response.json();
+
+}
+
+
+/* =====================================================
+   TEAM CREST
+===================================================== */
+
+function crestHTML(
+  crest,
+  teamName
+) {
+
+  if (!crest) {
+
+    return "";
+
+  }
+
+
+  return `
+    <img
+      class="team-crest"
+      src="${esc(crest)}"
+      alt="${esc(teamName)} crest"
+      loading="lazy"
+      referrerpolicy="no-referrer"
+      onerror="this.style.display='none'"
+    >
+  `;
 
 }
 
@@ -178,8 +210,11 @@ function tabs() {
   const container =
     $("#league-tabs");
 
+
   if (!container) {
+
     return;
+
   }
 
 
@@ -223,12 +258,6 @@ function tabs() {
 
 /* =====================================================
    LATEST SCORES
-   New API format:
-
-   e.homeTeam.name
-   e.awayTeam.name
-   e.score.home
-   e.score.away
 ===================================================== */
 
 function eventCard(e) {
@@ -237,6 +266,7 @@ function eventCard(e) {
     e.homeTeam?.shortName ||
     e.homeTeam?.name ||
     "Home";
+
 
   const away =
     e.awayTeam?.shortName ||
@@ -247,6 +277,7 @@ function eventCard(e) {
   const homeScore =
     e.score?.home ??
     "-";
+
 
   const awayScore =
     e.score?.away ??
@@ -282,6 +313,11 @@ function eventCard(e) {
       <div class="teams">
 
         <span>
+          ${crestHTML(
+            e.homeTeam?.crest,
+            home
+          )}
+
           ${esc(home)}
         </span>
 
@@ -295,6 +331,11 @@ function eventCard(e) {
 
         <span>
           ${esc(away)}
+
+          ${crestHTML(
+            e.awayTeam?.crest,
+            away
+          )}
         </span>
 
       </div>
@@ -315,12 +356,15 @@ async function loadScores() {
   const status =
     $("#scores-status");
 
+
   const grid =
     $("#scores-grid");
 
 
   if (!grid) {
+
     return;
+
   }
 
 
@@ -344,10 +388,6 @@ async function loadScores() {
       data.events || [];
 
 
-    /* -----------------------------------------------
-       Filter selected competition
-    ------------------------------------------------ */
-
     if (
       selected !== "all"
     ) {
@@ -366,10 +406,6 @@ async function loadScores() {
     }
 
 
-    /* -----------------------------------------------
-       Display results
-    ------------------------------------------------ */
-
     grid.innerHTML =
 
       events.length
@@ -384,10 +420,6 @@ async function loadScores() {
           </div>
         `;
 
-
-    /* -----------------------------------------------
-       Accurate update time
-    ------------------------------------------------ */
 
     if (status) {
 
@@ -454,11 +486,8 @@ async function loadScores() {
 
 
 /* =====================================================
-   FIXTURES
-   New API format:
-
-   e.homeTeam.name
-   e.awayTeam.name
+   FIXTURE CARD
+   Includes team crests
 ===================================================== */
 
 function fixtureCard(e) {
@@ -468,10 +497,21 @@ function fixtureCard(e) {
     e.homeTeam?.name ||
     "Home";
 
+
   const away =
     e.awayTeam?.shortName ||
     e.awayTeam?.name ||
     "Away";
+
+
+  const homeCrest =
+    e.homeTeam?.crest ||
+    "";
+
+
+  const awayCrest =
+    e.awayTeam?.crest ||
+    "";
 
 
   const league =
@@ -492,19 +532,39 @@ function fixtureCard(e) {
 
       <div class="fixture-teams">
 
-        <span>
-          ${esc(home)}
+
+        <span class="fixture-team home-team">
+
+          ${crestHTML(
+            homeCrest,
+            home
+          )}
+
+          <strong>
+            ${esc(home)}
+          </strong>
+
         </span>
 
 
-        <strong>
+        <strong class="fixture-vs">
           vs
         </strong>
 
 
-        <span>
-          ${esc(away)}
+        <span class="fixture-team away-team">
+
+          <strong>
+            ${esc(away)}
+          </strong>
+
+          ${crestHTML(
+            awayCrest,
+            away
+          )}
+
         </span>
+
 
       </div>
 
@@ -531,7 +591,9 @@ async function loadFixtures() {
 
 
   if (!grid) {
+
     return;
+
   }
 
 
@@ -599,17 +661,11 @@ function newsCard(article) {
 
       ? `
         <img
+          class="news-image"
           src="${esc(image)}"
           alt="${esc(article.title)}"
           loading="lazy"
           referrerpolicy="no-referrer"
-          style="
-            width:100%;
-            height:180px;
-            object-fit:cover;
-            display:block;
-            border-radius:8px 8px 0 0;
-          "
           onerror="this.style.display='none'"
         >
         `
@@ -624,25 +680,12 @@ function newsCard(article) {
       href="${esc(article.link)}"
       target="_blank"
       rel="noopener"
-      style="
-        overflow:hidden;
-        display:flex;
-        flex-direction:column;
-      "
     >
 
       ${imageHTML}
 
 
-      <div
-        style="
-          padding:16px;
-          flex:1;
-          display:flex;
-          flex-direction:column;
-          justify-content:space-between;
-        "
-      >
+      <div class="news-content">
 
         <div>
 
@@ -659,6 +702,19 @@ function newsCard(article) {
               article.title
             )}
           </h3>
+
+
+          ${
+            article.description
+              ? `
+                <p class="news-description">
+                  ${esc(
+                    article.description
+                  )}
+                </p>
+              `
+              : ""
+          }
 
         </div>
 
@@ -697,7 +753,9 @@ async function loadNews() {
 
 
   if (!grid) {
+
     return;
+
   }
 
 
@@ -761,7 +819,9 @@ function updatePageTime() {
 
 
   if (!element) {
+
     return;
+
   }
 
 
@@ -792,6 +852,7 @@ document.addEventListener(
     const year =
       $("#year");
 
+
     if (year) {
 
       year.textContent =
@@ -809,9 +870,7 @@ document.addEventListener(
     updatePageTime();
 
 
-    /* -----------------------------------------------
-       Automatic refresh
-    ------------------------------------------------ */
+    /* Scores every 2 minutes */
 
     setInterval(
       loadScores,
@@ -819,17 +878,23 @@ document.addEventListener(
     );
 
 
+    /* Fixtures every 15 minutes */
+
     setInterval(
       loadFixtures,
       900000
     );
 
 
+    /* News every 30 minutes */
+
     setInterval(
       loadNews,
       1800000
     );
 
+
+    /* Page time every minute */
 
     setInterval(
       updatePageTime,
