@@ -1,50 +1,11 @@
-/* YepFootball Worker
-   ---------------------------------------------------------
-   Secrets:
-     API_FOOTBALL_KEY
-     FOOTBALL_DATA_TOKEN
+const AF = "https://v3.football.api-sports.io";
+const FD = "https://api.football-data.org/v4";
+const BBC = "https://feeds.bbci.co.uk/sport/football/rss.xml";
 
-   KV binding:
-     LATEST_SCORES -> YepFootball Scores
+const KV_KEY = "latest";
+const PARIS_TIME_ZONE = "Europe/Paris";
 
-   Cron:
-     Every 15 minutes
-
-   IMPORTANT:
-     - Latest Scores = The Guardian football results
-     - Match Centre = API-Football
-     - Fixtures = football-data.org
-     - News = BBC Sport RSS
-   ---------------------------------------------------------
-*/
-
-const AF =
-  "https://v3.football.api-sports.io";
-
-const FD =
-  "https://api.football-data.org/v4";
-
-const BBC =
-  "https://feeds.bbci.co.uk/sport/football/rss.xml";
-
-const GUARDIAN_RESULTS =
-  "https://www.theguardian.com/football/results";
-
-
-/* -------------------------------------------------------
-   LEAGUES
-------------------------------------------------------- */
-
-const FD_LEAGUES = {
-  CL: "Champions League",
-  PL: "Premier League",
-  PD: "La Liga",
-  SA: "Serie A",
-  BL1: "Bundesliga",
-  FL1: "Ligue 1"
-};
-
-const AF_LEAGUES = {
+const LEAGUES = {
   2: "Champions League",
   3: "Europa League",
   848: "Conference League",
@@ -55,88 +16,51 @@ const AF_LEAGUES = {
   61: "Ligue 1"
 };
 
+const FD_LEAGUES = {
+  CL: "Champions League",
+  PL: "Premier League",
+  PD: "La Liga",
+  SA: "Serie A",
+  BL1: "Bundesliga",
+  FL1: "Ligue 1"
+};
 
-/* -------------------------------------------------------
-   FINAL STATUSES
-------------------------------------------------------- */
-
-const FINAL = new Set([
-  "FT",
-  "AET",
-  "PEN",
-  "AWD",
-  "WO"
-]);
-
-
-/* -------------------------------------------------------
-   JSON RESPONSE
-------------------------------------------------------- */
-
-function json(
-  data,
-  status = 200,
-  maxAge = 60
-) {
-  return new Response(
-    JSON.stringify(data),
-    {
-      status,
-      headers: {
-        "content-type":
-          "application/json; charset=utf-8",
-
-        "cache-control":
-          `public, max-age=${maxAge}`,
-
-        "access-control-allow-origin":
-          "*"
-      }
+function json(data, status = 200, maxAge = 30) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": `public, max-age=${maxAge}`,
+      "access-control-allow-origin": "*"
     }
-  );
+  });
 }
 
+function parisParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: PARIS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
 
-/* -------------------------------------------------------
-   PARIS DATE / TIME
-------------------------------------------------------- */
+  const out = {};
 
-function parisParts(d = new Date()) {
-
-  const a =
-    new Intl.DateTimeFormat(
-      "en-GB",
-      {
-        timeZone: "Europe/Paris",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hourCycle: "h23"
-      }
-    ).formatToParts(d);
-
-  const o = {};
-
-  for (const x of a) {
-    if (x.type !== "literal") {
-      o[x.type] = x.value;
-    }
+  for (const p of parts) {
+    out[p.type] = p.value;
   }
 
-  return o;
+  return out;
 }
 
+function previousParisDate() {
+  const p = parisParts();
 
-function previousParisDate(
-  d = new Date()
-) {
-
-  const p = parisParts(d);
-
-  const x = new Date(
+  const d = new Date(
     Date.UTC(
       Number(p.year),
       Number(p.month) - 1,
@@ -145,34 +69,418 @@ function previousParisDate(
     )
   );
 
-  x.setUTCDate(
-    x.getUTCDate() - 1
-  );
+  d.setUTCDate(d.getUTCDate() - 1);
 
-  return x
-    .toISOString()
-    .slice(0, 10);
+  return d;
 }
 
+function isoDateUTC(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+function guardianDateUrl(date) {
+  const p = parisParts(date);
+
+  const month = new Intl.DateTimeFormat("en-US", {
+    timeZone: PARIS_TIME_ZONE,
+    month: "short"
+  })
+    .format(date)
+    .toLowerCase();
+
+  return `https://www.theguardian.com/football/results/${p.year}/${month}/${p.day}`;
+}
+
+function guardianDateLabel(date) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: PARIS_TIME_ZONE,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  }).format(date);
+}
+
+function stripHtml(text = "") {
+  return text
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_, n) =>
+      String.fromCharCode(Number(n))
+    )
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) =>
+      String.fromCharCode(parseInt(n, 16))
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function guardianLeagueId(name) {
+  const n = name.toLowerCase();
+
+  if (n.includes("champions league")) return 2;
+  if (n.includes("europa league")) return 3;
+  if (n.includes("conference league")) return 848;
+  if (n.includes("premier league")) return 39;
+  if (n.includes("la liga")) return 140;
+  if (n.includes("serie a")) return 135;
+  if (n.includes("bundesliga")) return 78;
+  if (n.includes("ligue 1")) return 61;
+
+  return null;
+}
+
+/* -------------------------------------------------------
+   GUARDIAN DAILY RESULTS
+------------------------------------------------------- */
+
+function parseGuardianResults(html, targetDate) {
+  const wanted = guardianDateLabel(targetDate);
+
+  const tokens = [];
+
+  const re =
+    /<h2\b[^>]*>([\s\S]*?)<\/h2>|<h3\b[^>]*>([\s\S]*?)<\/h3>|<li\b[^>]*>([\s\S]*?)<\/li>/gi;
+
+  let m;
+
+  while ((m = re.exec(html))) {
+    if (m[1] != null) {
+      tokens.push({
+        type: "date",
+        text: stripHtml(m[1])
+      });
+    } else if (m[2] != null) {
+      tokens.push({
+        type: "league",
+        text: stripHtml(m[2])
+      });
+    } else {
+      tokens.push({
+        type: "result",
+        text: stripHtml(m[3])
+      });
+    }
+  }
+
+  let active = false;
+  let sawDate = false;
+  let league = "";
+
+  const events = [];
+
+  for (const token of tokens) {
+    if (token.type === "date") {
+      sawDate = true;
+      active = token.text.includes(wanted);
+
+      if (!active) {
+        league = "";
+      }
+
+      continue;
+    }
+
+    if (!active) continue;
+
+    if (token.type === "league") {
+      league = guardianLeagueId(token.text)
+        ? token.text
+        : "";
+
+      continue;
+    }
+
+    if (token.type !== "result" || !league) {
+      continue;
+    }
+
+    const match = token.text.match(
+      /^FT\s+(.+?)\s+(\d{2,3})\s+(.+)$/i
+    );
+
+    if (!match) continue;
+
+    const scoreToken = match[2];
+
+    let homeScore;
+    let awayScore;
+
+    if (scoreToken.length === 2) {
+      homeScore = Number(scoreToken[0]);
+      awayScore = Number(scoreToken[1]);
+    } else {
+      const firstTwo = Number(
+        scoreToken.slice(0, 2)
+      );
+
+      if (firstTwo >= 10) {
+        homeScore = firstTwo;
+        awayScore = Number(
+          scoreToken.slice(2)
+        );
+      } else {
+        homeScore = Number(scoreToken[0]);
+        awayScore = Number(scoreToken.slice(1));
+      }
+    }
+
+    const home = match[1].trim();
+
+    let away = match[3].trim();
+
+    away = away
+      .replace(
+        /\s+[A-Z][A-Za-z .'-]*\s+win\s+\d+-\d+\s+on\s+penalties$/i,
+        ""
+      )
+      .replace(
+        /\s+\(AET\)$/i,
+        ""
+      )
+      .trim();
+
+    const leagueId =
+      guardianLeagueId(league);
+
+    if (
+      !home ||
+      !away ||
+      !leagueId
+    ) {
+      continue;
+    }
+
+    events.push({
+      id:
+        `guardian-${isoDateUTC(targetDate)}-${events.length + 1}`,
+
+      date:
+        `${isoDateUTC(targetDate)}T12:00:00Z`,
+
+      league:
+        LEAGUES[leagueId],
+
+      leagueId,
+
+      leagueCode:
+        String(leagueId),
+
+      status: "FT",
+
+      statusLong:
+        "Match Finished",
+
+      homeTeam: {
+        name: home,
+        shortName: home,
+        crest: ""
+      },
+
+      awayTeam: {
+        name: away,
+        shortName: away,
+        crest: ""
+      },
+
+      score: {
+        home: homeScore,
+        away: awayScore
+      },
+
+      source:
+        "The Guardian football results"
+    });
+  }
+
+  if (!sawDate) {
+    // Exact-date URL fallback:
+    // parse the page's result blocks.
+  }
+
+  return events;
+}
+
+async function guardianScores(targetDate) {
+  const url =
+    guardianDateUrl(targetDate);
+
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "YepFootball/1.0 (+https://yepfootball.com)",
+
+      "Accept":
+        "text/html,application/xhtml+xml"
+    },
+
+    cf: {
+      cacheTtl: 300,
+      cacheEverything: true
+    }
+  });
+
+  if (!res.ok) {
+    throw new Error(
+      `Guardian results ${res.status}`
+    );
+  }
+
+  const events =
+    parseGuardianResults(
+      await res.text(),
+      targetDate
+    );
+
+  return {
+    events,
+    count: events.length,
+    date: isoDateUTC(targetDate),
+
+    source:
+      "The Guardian football results",
+
+    sourceUrl: url,
+
+    publishedAt:
+      new Date().toISOString()
+  };
+}
+
+async function publishYesterday(env) {
+  if (!env.LATEST_SCORES) {
+    throw new Error(
+      "Missing Cloudflare KV binding LATEST_SCORES"
+    );
+  }
+
+  const targetDate =
+    previousParisDate();
+
+  const dateKey =
+    isoDateUTC(targetDate);
+
+  const existing =
+    await env.LATEST_SCORES.get(
+      KV_KEY,
+      "json"
+    );
+
+  try {
+    const snapshot =
+      await guardianScores(targetDate);
+
+    if (!snapshot.events.length) {
+      return {
+        ...snapshot,
+        message:
+          "No completed matches recorded for the previous day.",
+        preserved:
+          Boolean(existing)
+      };
+    }
+
+    await env.LATEST_SCORES.put(
+      KV_KEY,
+      JSON.stringify(snapshot)
+    );
+
+    await env.LATEST_SCORES.put(
+      `scores:${dateKey}`,
+      JSON.stringify(snapshot)
+    );
+
+    return snapshot;
+
+  } catch (error) {
+
+    if (existing) {
+      return {
+        ...existing,
+        preserved: true,
+        sourceError:
+          error?.message ||
+          String(error)
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function latestScores(
+  env,
+  league
+) {
+  if (!env.LATEST_SCORES) {
+    throw new Error(
+      "Missing Cloudflare KV binding LATEST_SCORES"
+    );
+  }
+
+  const snapshot =
+    await env.LATEST_SCORES.get(
+      KV_KEY,
+      "json"
+    );
+
+  if (!snapshot) {
+    return {
+      events: [],
+      count: 0,
+
+      message:
+        "No daily score snapshot is available yet.",
+
+      updated:
+        new Date().toISOString()
+    };
+  }
+
+  let events =
+    snapshot.events || [];
+
+  if (league) {
+    const id = Number(league);
+
+    events =
+      events.filter(
+        e => e.leagueId === id
+      );
+  }
+
+  return {
+    ...snapshot,
+    events,
+    count: events.length
+  };
+}
 
 /* -------------------------------------------------------
    API-FOOTBALL
-   Used ONLY for Match Centre
+   Used only for LIVE MATCH CENTRE
 ------------------------------------------------------- */
 
 async function afFetch(
   path,
   env,
-  ttl = 60
+  cacheSeconds = 30
 ) {
-
   if (!env.API_FOOTBALL_KEY) {
-    throw Error(
+    throw new Error(
       "Missing Cloudflare secret API_FOOTBALL_KEY"
     );
   }
 
-  const r = await fetch(
+  const res = await fetch(
     `${AF}${path}`,
     {
       headers: {
@@ -184,53 +492,162 @@ async function afFetch(
       },
 
       cf: {
-        cacheTtl: ttl,
+        cacheTtl:
+          cacheSeconds,
+
         cacheEverything: true
       }
     }
   );
 
-  const t = await r.text();
+  const text =
+    await res.text();
 
-  if (!r.ok) {
-    throw Error(
-      `API-Football ${r.status}: ${t.slice(0, 400)}`
+  if (!res.ok) {
+    throw new Error(
+      `API-Football ${res.status}: ${text.slice(0, 250)}`
     );
   }
 
-  const d = JSON.parse(t);
-
-  if (
-    d.errors &&
-    Object.keys(d.errors).length
-  ) {
-    throw Error(
-      `API-Football error: ${JSON.stringify(d.errors)}`
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      "API-Football returned invalid JSON"
     );
   }
-
-  return d;
 }
 
+function normalizeAF(match) {
+  const leagueId =
+    Number(match.league?.id);
+
+  const status =
+    match.fixture?.status || {};
+
+  return {
+    id:
+      String(
+        match.fixture?.id || ""
+      ),
+
+    date:
+      match.fixture?.date ||
+      null,
+
+    timestamp:
+      match.fixture?.timestamp ||
+      null,
+
+    league:
+      LEAGUES[leagueId] ||
+      match.league?.name ||
+      "",
+
+    leagueId,
+
+    leagueCode:
+      String(leagueId || ""),
+
+    status:
+      status.short || "",
+
+    statusLong:
+      status.long || "",
+
+    elapsed:
+      status.elapsed ?? null,
+
+    homeTeam: {
+      id:
+        match.teams?.home?.id,
+
+      name:
+        match.teams?.home?.name ||
+        "",
+
+      shortName:
+        match.teams?.home?.name ||
+        "",
+
+      crest:
+        match.teams?.home?.logo ||
+        ""
+    },
+
+    awayTeam: {
+      id:
+        match.teams?.away?.id,
+
+      name:
+        match.teams?.away?.name ||
+        "",
+
+      shortName:
+        match.teams?.away?.name ||
+        "",
+
+      crest:
+        match.teams?.away?.logo ||
+        ""
+    },
+
+    score: {
+      home:
+        match.goals?.home,
+
+      away:
+        match.goals?.away
+    }
+  };
+}
+
+async function matchCentre(env) {
+  const data =
+    await afFetch(
+      "/fixtures?live=all",
+      env,
+      20
+    );
+
+  const events =
+    (data.response || [])
+      .map(normalizeAF)
+      .filter(
+        e =>
+          e.leagueId &&
+          LEAGUES[e.leagueId]
+      );
+
+  return {
+    events,
+    live: events,
+    finished: [],
+    upcoming: [],
+    count: events.length,
+    liveCount: events.length,
+    updated:
+      new Date().toISOString()
+  };
+}
 
 /* -------------------------------------------------------
    FOOTBALL-DATA.ORG
-   Used for Fixtures
+   Used for FIXTURES
 ------------------------------------------------------- */
 
 async function fdFetch(
   path,
   env,
-  ttl = 300
+  cacheSeconds = 120
 ) {
-
   if (!env.FOOTBALL_DATA_TOKEN) {
-    throw Error(
+    throw new Error(
       "Missing Cloudflare secret FOOTBALL_DATA_TOKEN"
     );
   }
 
-  const r = await fetch(
+  const res = await fetch(
     `${FD}${path}`,
     {
       headers: {
@@ -242,1002 +659,172 @@ async function fdFetch(
       },
 
       cf: {
-        cacheTtl: ttl,
+        cacheTtl:
+          cacheSeconds,
+
         cacheEverything: true
       }
     }
   );
 
-  const t = await r.text();
+  const text =
+    await res.text();
 
-  if (!r.ok) {
-    throw Error(
-      `football-data.org ${r.status}: ${t.slice(0, 300)}`
+  if (!res.ok) {
+    throw new Error(
+      `football-data.org ${res.status}: ${text.slice(0, 250)}`
     );
   }
 
-  return JSON.parse(t);
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      "football-data.org returned invalid JSON"
+    );
+  }
 }
 
-
-/* -------------------------------------------------------
-   API-FOOTBALL NORMALISATION
-------------------------------------------------------- */
-
-function afNorm(x) {
-
-  const s =
-    x.fixture?.status || {};
-
-  const h =
-    x.teams?.home || {};
-
-  const a =
-    x.teams?.away || {};
-
-  const lid =
-    Number(x.league?.id);
-
+function normalizeFD(match) {
   return {
-
     id:
-      String(x.fixture?.id),
+      String(match.id),
 
     date:
-      x.fixture?.date || null,
+      match.utcDate,
 
     status:
-      s.short || "",
-
-    statusLong:
-      s.long || "",
+      match.status,
 
     minute:
-      s.elapsed ?? null,
-
-    live:
-      [
-        "1H",
-        "HT",
-        "2H",
-        "ET",
-        "BT",
-        "P",
-        "LIVE"
-      ].includes(s.short),
-
-    league:
-      AF_LEAGUES[lid] ||
-      x.league?.name ||
-      "European football",
-
-    leagueCode:
-      String(lid || ""),
-
-    leagueId:
-      lid,
-
-    homeTeam: {
-      id: h.id,
-      name: h.name || "",
-      shortName: h.name || "",
-      crest: h.logo || ""
-    },
-
-    awayTeam: {
-      id: a.id,
-      name: a.name || "",
-      shortName: a.name || "",
-      crest: a.logo || ""
-    },
-
-    score: {
-      home:
-        x.goals?.home ?? null,
-
-      away:
-        x.goals?.away ?? null
-    }
-  };
-}
-
-
-/* -------------------------------------------------------
-   GUARDIAN HELPERS
-------------------------------------------------------- */
-
-function htmlDecode(
-  text = ""
-) {
-
-  return text
-
-    .replace(
-      /<!\[CDATA\[([\s\S]*?)\]\]>/g,
-      "$1"
-    )
-
-    .replace(
-      /&nbsp;/gi,
-      " "
-    )
-
-    .replace(
-      /&amp;/gi,
-      "&"
-    )
-
-    .replace(
-      /&quot;/gi,
-      '"'
-    )
-
-    .replace(
-      /&#39;/gi,
-      "'"
-    )
-
-    .replace(
-      /&apos;/gi,
-      "'"
-    )
-
-    .replace(
-      /&lt;/gi,
-      "<"
-    )
-
-    .replace(
-      /&gt;/gi,
-      ">"
-    )
-
-    .replace(
-      /&#(\d+);/g,
-      (_, n) =>
-        String.fromCharCode(
-          Number(n)
-        )
-    )
-
-    .replace(
-      /&#x([0-9a-f]+);/gi,
-      (_, n) =>
-        String.fromCharCode(
-          parseInt(n, 16)
-        )
-    );
-}
-
-
-function stripTags(
-  text = ""
-) {
-
-  return htmlDecode(
-    text
-      .replace(
-        /<script[\s\S]*?<\/script>/gi,
-        " "
-      )
-      .replace(
-        /<style[\s\S]*?<\/style>/gi,
-        " "
-      )
-      .replace(
-        /<[^>]+>/g,
-        " "
-      )
-  )
-    .replace(
-      /\s+/g,
-      " "
-    )
-    .trim();
-}
-
-
-/* -------------------------------------------------------
-   GUARDIAN DATE FORMATTING
-------------------------------------------------------- */
-
-function guardianDateLabel(
-  date
-) {
-
-  const d =
-    new Date(`${date}T12:00:00Z`);
-
-  return new Intl.DateTimeFormat(
-    "en-GB",
-    {
-      timeZone: "Europe/London",
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric"
-    }
-  ).format(d);
-}
-
-
-/* -------------------------------------------------------
-   GUARDIAN RESULTS PARSER
-------------------------------------------------------- */
-
-function parseGuardianResults(
-  html,
-  targetDate
-) {
-
-  const events = [];
-
-  const wantedDate =
-    guardianDateLabel(targetDate)
-      .toLowerCase();
-
-  /*
-     Convert the HTML into reasonably readable
-     text while retaining line boundaries.
-  */
-
-  let text =
-    html
-      .replace(
-        /<\/(h1|h2|h3|h4|h5|h6|li|p|div|article|section|tr)>/gi,
-        "\n"
-      )
-      .replace(
-        /<br\s*\/?>/gi,
-        "\n"
-      );
-
-  text =
-    stripTags(text);
-
-  /*
-     Guardian pages normally contain date headings
-     followed by competition sections and result lines.
-
-     We look for the requested date and then process
-     the following text.
-  */
-
-  const lines =
-    text
-      .split(/\n+/)
-      .map(x => x.trim())
-      .filter(Boolean);
-
-  let inTargetDate = false;
-  let currentLeague = "";
-
-  const leagueNames = [
-    "Premier League",
-    "La Liga",
-    "Serie A",
-    "Bundesliga",
-    "Ligue 1",
-    "Champions League",
-    "Europa League",
-    "Europa Conference League",
-    "Conference League"
-  ];
-
-  const leagueIds = {
-    "Premier League": 39,
-    "La Liga": 140,
-    "Serie A": 135,
-    "Bundesliga": 78,
-    "Ligue 1": 61,
-    "Champions League": 2,
-    "Europa League": 3,
-    "Europa Conference League": 848,
-    "Conference League": 848
-  };
-
-
-  for (
-    let i = 0;
-    i < lines.length;
-    i++
-  ) {
-
-    const line =
-      lines[i];
-
-    const lower =
-      line.toLowerCase();
-
-
-    /*
-       Detect the requested date.
-    */
-
-    if (
-      lower.includes(
-        wantedDate
-      )
-    ) {
-
-      inTargetDate = true;
-      continue;
-    }
-
-
-    /*
-       Stop when another dated section
-       is encountered.
-    */
-
-    if (
-      inTargetDate &&
-      /\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\d{1,2}\s+\w+\s+\d{4}\b/i
-        .test(line)
-    ) {
-
-      if (
-        !lower.includes(
-          wantedDate
-        )
-      ) {
-        break;
-      }
-    }
-
-
-    if (!inTargetDate) {
-      continue;
-    }
-
-
-    /*
-       Detect competition.
-    */
-
-    for (
-      const name of leagueNames
-    ) {
-
-      if (
-        lower ===
-        name.toLowerCase()
-      ) {
-
-        currentLeague =
-          name;
-
-        break;
-      }
-    }
-
-
-    /*
-       Result formats seen on the Guardian
-       include examples such as:
-
-       FT Arsenal 2-0 Chelsea
-       FT Barcelona 3-1 ...
-       FT Inter 5-3 Udinese
-
-       We therefore look for FT followed by
-       two team names separated by a score.
-    */
-
-    const m =
-      line.match(
-        /^FT\s+(.+?)\s+(\d+)\s*[-–]\s*(\d+)\s+(.+?)$/i
-      );
-
-    if (!m) {
-      continue;
-    }
-
-
-    const home =
-      m[1].trim();
-
-    const homeScore =
-      Number(m[2]);
-
-    const awayScore =
-      Number(m[3]);
-
-    const away =
-      m[4].trim();
-
-
-    /*
-       Only keep competitions displayed on
-       YepFootball.
-    */
-
-    const league =
-      currentLeague;
-
-    if (!league) {
-      continue;
-    }
-
-
-    const leagueId =
-      leagueIds[league];
-
-    if (!leagueId) {
-      continue;
-    }
-
-
-    events.push({
-
-      id:
-        `${targetDate}-${leagueId}-${home}-${away}`
-          .replace(
-            /[^a-zA-Z0-9_-]+/g,
-            "-"
-          ),
-
-      date:
-        `${targetDate}T12:00:00Z`,
-
-      status:
-        "FT",
-
-      statusLong:
-        "Match Finished",
-
-      minute:
-        null,
-
-      live:
-        false,
-
-      league,
-
-      leagueCode:
-        String(leagueId),
-
-      leagueId,
-
-      homeTeam: {
-        id: null,
-        name: home,
-        shortName: home,
-        crest: ""
-      },
-
-      awayTeam: {
-        id: null,
-        name: away,
-        shortName: away,
-        crest: ""
-      },
-
-      score: {
-        home: homeScore,
-        away: awayScore
-      }
-
-    });
-  }
-
-
-  /*
-     Remove duplicates.
-  */
-
-  const seen =
-    new Set();
-
-  return events
-    .filter(e => {
-
-      if (seen.has(e.id)) {
-        return false;
-      }
-
-      seen.add(e.id);
-
-      return true;
-    })
-
-    .sort(
-      (a, b) =>
-        a.league.localeCompare(
-          b.league
-        ) ||
-        a.homeTeam.name.localeCompare(
-          b.homeTeam.name
-        )
-    );
-}
-
-
-/* -------------------------------------------------------
-   WEB DAILY SCORES
-------------------------------------------------------- */
-
-async function webDailyScores(
-  env,
-  date
-) {
-
-  const r =
-    await fetch(
-      GUARDIAN_RESULTS,
-      {
-        headers: {
-          "User-Agent":
-            "YepFootball/1.0 (+https://yepfootball.com)",
-
-          "Accept":
-            "text/html,application/xhtml+xml"
-        },
-
-        cf: {
-          cacheTtl: 900,
-          cacheEverything: true
-        }
-      }
-    );
-
-  if (!r.ok) {
-    throw Error(
-      `The Guardian results ${r.status}`
-    );
-  }
-
-  const html =
-    await r.text();
-
-  const events =
-    parseGuardianResults(
-      html,
-      date
-    );
-
-  return events;
-}
-
-
-/* -------------------------------------------------------
-   DAILY SCORES
-   IMPORTANT:
-   This NO LONGER uses API-Football.
-------------------------------------------------------- */
-
-async function dailyScores(
-  env,
-  date
-) {
-
-  return webDailyScores(
-    env,
-    date
-  );
-}
-
-
-/* -------------------------------------------------------
-   PUBLISH YESTERDAY
-------------------------------------------------------- */
-
-async function publishYesterday(
-  env
-) {
-
-  if (!env.LATEST_SCORES) {
-    throw Error(
-      "Missing Cloudflare KV binding LATEST_SCORES"
-    );
-  }
-
-
-  const date =
-    previousParisDate();
-
-
-  /*
-     Never regenerate an already-published
-     snapshot.
-  */
-
-  const existing =
-    await env.LATEST_SCORES.get(
-      `scores:${date}`,
-      "json"
-    );
-
-  if (existing) {
-
-    return {
-      ok: true,
-      skipped: true,
-      date,
-      reason:
-        "Already published"
-    };
-  }
-
-
-  const events =
-    await dailyScores(
-      env,
-      date
-    );
-
-
-  const p = {
-
-    events,
-
-    count:
-      events.length,
-
-    date,
-
-    source:
-      "The Guardian football results",
-
-    publishedAt:
-      new Date().toISOString(),
-
-    message:
-      events.length
-        ? null
-        : "No completed matches recorded for the previous day."
-
-  };
-
-
-  /*
-     Write the dated snapshot first.
-  */
-
-  await env.LATEST_SCORES.put(
-    `scores:${date}`,
-    JSON.stringify(p)
-  );
-
-
-  /*
-     Then update the current snapshot.
-  */
-
-  await env.LATEST_SCORES.put(
-    "latest",
-    JSON.stringify(p)
-  );
-
-
-  return p;
-}
-
-
-/* -------------------------------------------------------
-   LATEST SCORES
-------------------------------------------------------- */
-
-async function latest(
-  env
-) {
-
-  if (!env.LATEST_SCORES) {
-    throw Error(
-      "Missing Cloudflare KV binding LATEST_SCORES"
-    );
-  }
-
-
-  const p =
-    await env.LATEST_SCORES.get(
-      "latest",
-      "json"
-    );
-
-
-  return (
-    p ||
-    {
-      events: [],
-      count: 0,
-      date: null,
-      source: "Cloudflare KV",
-      publishedAt: null,
-      message:
-        "No daily snapshot is available yet."
-    }
-  );
-}
-
-
-/* -------------------------------------------------------
-   MATCH CENTRE
-   API-FOOTBALL REMAINS HERE
-------------------------------------------------------- */
-
-async function matchCentre(
-  env
-) {
-
-  const d =
-    await afFetch(
-      "/fixtures?live=all&timezone=Europe/Paris",
-      env,
-      60
-    );
-
-
-  const events =
-    (d.response || [])
-
-      .filter(
-        x =>
-          AF_LEAGUES[
-            Number(
-              x.league?.id
-            )
-          ]
-      )
-
-      .map(afNorm)
-
-      .filter(
-        x => x.live
-      )
-
-      .sort(
-        (a, b) =>
-          new Date(a.date) -
-          new Date(b.date)
-      );
-
-
-  return {
-
-    events,
-
-    live:
-      events,
-
-    finished: [],
-
-    upcoming: [],
-
-    count:
-      events.length,
-
-    liveCount:
-      events.length,
-
-    source:
-      "API-Football",
-
-    updated:
-      new Date().toISOString()
-
-  };
-}
-
-
-/* -------------------------------------------------------
-   FOOTBALL-DATA NORMALISATION
-------------------------------------------------------- */
-
-function fdNorm(m) {
-
-  return {
-
-    id:
-      String(m.id),
-
-    date:
-      m.utcDate,
-
-    status:
-      m.status,
-
-    minute:
-      m.minute ?? null,
+      match.minute ?? null,
 
     league:
       FD_LEAGUES[
-        m.competition?.code
+        match.competition?.code
       ] ||
-      m.competition?.name ||
+      match.competition?.name ||
       "",
 
     leagueCode:
-      m.competition?.code ||
+      match.competition?.code ||
       "",
 
-    matchday:
-      m.matchday ?? null,
-
-    stage:
-      m.stage ?? null,
-
     homeTeam: {
-
       id:
-        m.homeTeam?.id,
+        match.homeTeam?.id,
 
       name:
-        m.homeTeam?.name ||
+        match.homeTeam?.name ||
         "",
 
       shortName:
-        m.homeTeam?.shortName ||
-        m.homeTeam?.name ||
+        match.homeTeam?.shortName ||
+        match.homeTeam?.name ||
         "",
 
       crest:
-        m.homeTeam?.crest ||
+        match.homeTeam?.crest ||
         ""
-
     },
 
     awayTeam: {
-
       id:
-        m.awayTeam?.id,
+        match.awayTeam?.id,
 
       name:
-        m.awayTeam?.name ||
+        match.awayTeam?.name ||
         "",
 
       shortName:
-        m.awayTeam?.shortName ||
-        m.awayTeam?.name ||
+        match.awayTeam?.shortName ||
+        match.awayTeam?.name ||
         "",
 
       crest:
-        m.awayTeam?.crest ||
+        match.awayTeam?.crest ||
         ""
-
     },
 
     score:
-      m.score || {}
-
+      match.score || {}
   };
 }
 
-
-/* -------------------------------------------------------
-   FIXTURES
-   football-data.org remains unchanged
-------------------------------------------------------- */
-
-async function fixtures(
-  env
-) {
-
-  const n =
+async function fixtures(env) {
+  const now =
     new Date();
 
-  const e =
-    new Date(n);
+  const end =
+    new Date(now);
 
-  e.setUTCDate(
-    e.getUTCDate() + 7
+  end.setUTCDate(
+    end.getUTCDate() + 7
   );
-
 
   const q =
     new URLSearchParams({
-
       competitions:
-        Object.keys(
-          FD_LEAGUES
-        ).join(","),
+        Object.keys(FD_LEAGUES).join(","),
 
       dateFrom:
-        n.toISOString()
-          .slice(0, 10),
+        isoDateUTC(now),
 
       dateTo:
-        e.toISOString()
-          .slice(0, 10)
-
+        isoDateUTC(end)
     });
 
-
-  const d =
+  const data =
     await fdFetch(
-      `/matches?${q}`,
+      `/matches?${q.toString()}`,
       env,
-      300
+      120
     );
 
-
   const events =
-    (d.matches || [])
-
-      .map(fdNorm)
-
+    (data.matches || [])
+      .map(normalizeFD)
       .filter(
-        x =>
-          new Date(x.date) >= n
+        e =>
+          new Date(e.date) >= now
       )
-
       .sort(
         (a, b) =>
           new Date(a.date) -
           new Date(b.date)
       )
-
       .slice(0, 60);
 
-
   return {
-
     events,
-
-    count:
-      events.length,
+    count: events.length,
 
     message:
       events.length
         ? null
         : "No upcoming fixtures found.",
 
-    source:
-      "football-data.org",
-
     updated:
       new Date().toISOString()
-
   };
 }
 
-
 /* -------------------------------------------------------
-   BBC NEWS
-   UNCHANGED
+   BBC SPORT NEWS
 ------------------------------------------------------- */
 
-function dec(
-  t = ""
-) {
-
-  return t
-
+function decodeEntities(text = "") {
+  return text
     .replace(
       /<!\[CDATA\[([\s\S]*?)\]\]>/g,
       "$1"
     )
-
-    .replace(
-      /&amp;/g,
-      "&"
-    )
-
-    .replace(
-      /&quot;/g,
-      '"'
-    )
-
-    .replace(
-      /&#39;/g,
-      "'"
-    )
-
-    .replace(
-      /&apos;/g,
-      "'"
-    )
-
-    .replace(
-      /&lt;/g,
-      "<"
-    )
-
-    .replace(
-      /&gt;/g,
-      ">"
-    )
-
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
     .replace(
       /&#(\d+);/g,
       (_, n) =>
@@ -1245,7 +832,6 @@ function dec(
           Number(n)
         )
     )
-
     .replace(
       /&#x([0-9a-f]+);/gi,
       (_, n) =>
@@ -1255,86 +841,99 @@ function dec(
     );
 }
 
-
-function xv(
-  x,
+function xmlValue(
+  xml,
   tag
 ) {
-
-  const m =
-    x.match(
-      new RegExp(
-        `<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`,
-        "i"
-      )
+  const re =
+    new RegExp(
+      `<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`,
+      "i"
     );
 
+  const match =
+    xml.match(re);
 
-  return m
-    ? dec(m[1].trim())
+  return match
+    ? decodeEntities(
+        match[1].trim()
+      )
     : "";
 }
 
+function parseBBCNews(xml) {
+  const items = [];
 
-function parseNews(
-  x
-) {
-
-  const out = [];
-
-  const items =
-    x.match(
+  const matches =
+    xml.match(
       /<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi
     ) || [];
 
-
-  for (
-    const i of items
-  ) {
+  for (const item of matches) {
 
     const title =
-      xv(i, "title");
+      xmlValue(item, "title");
 
     const link =
-      xv(i, "link");
+      xmlValue(item, "link");
 
+    const description =
+      xmlValue(
+        item,
+        "description"
+      );
+
+    const published =
+      xmlValue(
+        item,
+        "pubDate"
+      ) ||
+      xmlValue(
+        item,
+        "dc:date"
+      );
 
     if (!title || !link) {
       continue;
     }
 
+    let image = "";
 
-    const mc =
-      i.match(
+    const mediaContent =
+      item.match(
         /<media:content[^>]+url=["']([^"']+)["']/i
       );
 
-    const mt =
-      i.match(
+    const mediaThumbnail =
+      item.match(
         /<media:thumbnail[^>]+url=["']([^"']+)["']/i
       );
 
-    const en =
-      i.match(
+    const enclosure =
+      item.match(
         /<enclosure[^>]+url=["']([^"']+)["']/i
       );
 
+    if (mediaContent) {
+      image =
+        mediaContent[1];
+    } else if (mediaThumbnail) {
+      image =
+        mediaThumbnail[1];
+    } else if (enclosure) {
+      image =
+        enclosure[1];
+    }
 
-    out.push({
-
+    items.push({
       title,
-
       link,
-
       source:
         "BBC Sport",
-
-      published:
-        xv(i, "pubDate") ||
-        xv(i, "dc:date"),
+      published,
 
       description:
-        xv(i, "description")
+        description
           .replace(
             /<[^>]+>/g,
             ""
@@ -1342,34 +941,24 @@ function parseNews(
           .trim()
           .slice(0, 240),
 
-      image:
-        mc?.[1] ||
-        mt?.[1] ||
-        en?.[1] ||
-        ""
-
+      image
     });
   }
 
-
-  return out;
+  return items;
 }
 
-
 async function news() {
-
-  const r =
+  const res =
     await fetch(
       BBC,
       {
         headers: {
-
           "User-Agent":
             "YepFootball/1.0 (+https://yepfootball.com)",
 
           "Accept":
             "application/rss+xml, application/xml, text/xml"
-
         },
 
         cf: {
@@ -1379,26 +968,21 @@ async function news() {
       }
     );
 
-
-  if (!r.ok) {
-    throw Error(
-      `BBC RSS ${r.status}`
+  if (!res.ok) {
+    throw new Error(
+      `BBC RSS ${res.status}`
     );
   }
 
-
-  const a =
-    parseNews(
-      await r.text()
+  const articles =
+    parseBBCNews(
+      await res.text()
     ).slice(0, 12);
 
-
   return {
-
-    articles: a,
-
+    articles,
     count:
-      a.length,
+      articles.length,
 
     source: {
       name:
@@ -1410,192 +994,122 @@ async function news() {
 
     updated:
       new Date().toISOString()
-
   };
 }
-
 
 /* -------------------------------------------------------
    HEALTH
 ------------------------------------------------------- */
 
-async function health(
-  env
-) {
+async function health(env) {
+  const upstreams = {
+    apiFootball:
+      env.API_FOOTBALL_KEY
+        ? "configured"
+        : "Missing secret",
 
-  const r = {
+    footballData:
+      env.FOOTBALL_DATA_TOKEN
+        ? "configured"
+        : "Missing secret",
 
-    ok: true,
+    latestScores:
+      env.LATEST_SCORES
+        ? "ok"
+        : "Missing KV binding LATEST_SCORES"
+  };
 
-    upstreams: {},
+  return {
+    ok:
+      Object.values(upstreams)
+        .every(
+          v =>
+            v === "configured" ||
+            v === "ok"
+        ),
+
+    upstreams,
 
     elapsedMs: 0,
 
     checked:
       new Date().toISOString()
-
   };
-
-
-  const started =
-    Date.now();
-
-
-  r.upstreams.apiFootball =
-    env.API_FOOTBALL_KEY
-      ? "configured"
-      : "Missing secret";
-
-
-  r.upstreams.footballData =
-    env.FOOTBALL_DATA_TOKEN
-      ? "configured"
-      : "Missing secret";
-
-
-  if (
-    !env.API_FOOTBALL_KEY ||
-    !env.FOOTBALL_DATA_TOKEN
-  ) {
-
-    r.ok = false;
-
-  }
-
-
-  if (!env.LATEST_SCORES) {
-
-    r.ok = false;
-
-    r.upstreams.latestScores =
-      "Missing KV binding LATEST_SCORES";
-
-  } else {
-
-    const p =
-      await env.LATEST_SCORES.get(
-        "latest",
-        "json"
-      );
-
-
-    r.upstreams.latestScores =
-      p
-        ? `ok (${p.date || "unknown date"})`
-        : "configured but empty";
-  }
-
-
-  r.elapsedMs =
-    Date.now() - started;
-
-
-  return r;
 }
-
 
 /* -------------------------------------------------------
    REQUEST HANDLER
 ------------------------------------------------------- */
 
 async function handle(
-  req,
+  request,
   env
 ) {
+  const url =
+    new URL(request.url);
 
-  const p =
-    new URL(req.url).pathname;
-
-
-  try {
-
-    if (
-      p === "/api/health"
-    ) {
-
-      const r =
-        await health(env);
-
-      return json(
-        r,
-        r.ok ? 200 : 502,
-        30
-      );
-    }
-
-
-    if (
-      p === "/api/scores"
-    ) {
-
-      return json(
-        await latest(env),
-        200,
-        300
-      );
-    }
-
-
-    if (
-      p === "/api/match-centre"
-    ) {
-
-      return json(
-        await matchCentre(env),
-        200,
-        60
-      );
-    }
-
-
-    if (
-      p === "/api/fixtures"
-    ) {
-
-      return json(
-        await fixtures(env),
-        200,
-        300
-      );
-    }
-
-
-    if (
-      p === "/api/news"
-    ) {
-
-      return json(
-        await news(),
-        200,
-        900
-      );
-    }
-
-
-  } catch (e) {
-
+  if (
+    url.pathname ===
+    "/api/health"
+  ) {
     return json(
-      {
-        error:
-          "Football data feed unavailable",
-
-        detail:
-          e.message ||
-          String(e),
-
-        checked:
-          new Date().toISOString()
-      },
-      502,
-      30
+      await health(env),
+      200,
+      10
     );
-
   }
 
+  if (
+    url.pathname ===
+    "/api/scores"
+  ) {
+    return json(
+      await latestScores(
+        env,
+        url.searchParams.get(
+          "league"
+        )
+      ),
+      200,
+      60
+    );
+  }
+
+  if (
+    url.pathname ===
+    "/api/match-centre"
+  ) {
+    return json(
+      await matchCentre(env),
+      200,
+      20
+    );
+  }
+
+  if (
+    url.pathname ===
+    "/api/fixtures"
+  ) {
+    return json(
+      await fixtures(env),
+      200,
+      120
+    );
+  }
+
+  if (
+    url.pathname ===
+    "/api/news"
+  ) {
+    return json(
+      await news(),
+      200,
+      900
+    );
+  }
 
   return null;
 }
-
 
 /* -------------------------------------------------------
    CLOUDFLARE WORKER
@@ -1604,25 +1118,46 @@ async function handle(
 export default {
 
   async fetch(
-    req,
+    request,
     env,
     ctx
   ) {
 
-    const r =
-      await handle(
-        req,
-        env
+    try {
+
+      const api =
+        await handle(
+          request,
+          env
+        );
+
+      if (api) {
+        return api;
+      }
+
+      return env.ASSETS.fetch(
+        request
       );
 
+    } catch (error) {
 
-    return (
-      r ||
-      env.ASSETS.fetch(req)
-    );
+      return json(
+        {
+          error:
+            "Football data feed unavailable",
 
+          detail:
+            error?.message ||
+            String(error),
+
+          checked:
+            new Date().toISOString()
+        },
+        502,
+        30
+      );
+    }
   },
-
 
   async scheduled(
     event,
@@ -1630,30 +1165,8 @@ export default {
     ctx
   ) {
 
-    /*
-       The Cron runs every 15 minutes.
-
-       After midnight Paris time, publishYesterday()
-       automatically detects the previous calendar day.
-
-       It does NOT need to run at exactly 23:50.
-    */
-
     ctx.waitUntil(
-      publishYesterday(
-        env
-      ).catch(
-        err => {
-
-          console.error(
-            "Daily scores snapshot not published:",
-            err
-          );
-
-        }
-      )
+      publishYesterday(env)
     );
-
   }
-
 };
