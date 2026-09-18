@@ -25,6 +25,55 @@ const FD_LEAGUES = {
   FL1: "Ligue 1"
 };
 
+/*
+  Guardian competition result pages.
+
+  We deliberately use the competition pages instead of:
+  /football/results/YYYY/mon/day
+
+  because the Guardian competition pages give us a much
+  more reliable date -> league -> result structure.
+*/
+const GUARDIAN_RESULTS = {
+  2: {
+    name: "Champions League",
+    url: "https://www.theguardian.com/football/championsleague/results"
+  },
+  3: {
+    name: "Europa League",
+    url: "https://www.theguardian.com/football/uefa-europa-league/results"
+  },
+  848: {
+    name: "Conference League",
+    url: "https://www.theguardian.com/football/europa-conference-league/results"
+  },
+  39: {
+    name: "Premier League",
+    url: "https://www.theguardian.com/football/premierleague/results"
+  },
+  140: {
+    name: "La Liga",
+    url: "https://www.theguardian.com/football/laligafootball/results"
+  },
+  135: {
+    name: "Serie A",
+    url: "https://www.theguardian.com/football/serieafootball/results"
+  },
+  78: {
+    name: "Bundesliga",
+    url: "https://www.theguardian.com/football/bundesligafootball/results"
+  },
+  61: {
+    name: "Ligue 1",
+    url: "https://www.theguardian.com/football/ligue1football/results"
+  }
+};
+
+
+/* ---------------------------------------------------------
+   COMMON HELPERS
+--------------------------------------------------------- */
+
 function json(data, status = 200, maxAge = 30) {
   return new Response(JSON.stringify(data), {
     status,
@@ -35,6 +84,7 @@ function json(data, status = 200, maxAge = 30) {
     }
   });
 }
+
 
 function parisParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -57,6 +107,7 @@ function parisParts(date = new Date()) {
   return out;
 }
 
+
 function previousParisDate() {
   const p = parisParts();
 
@@ -74,22 +125,11 @@ function previousParisDate() {
   return d;
 }
 
-function isoDateUTC(d) {
-  return d.toISOString().slice(0, 10);
+
+function isoDateUTC(date) {
+  return date.toISOString().slice(0, 10);
 }
 
-function guardianDateUrl(date) {
-  const p = parisParts(date);
-
-  const month = new Intl.DateTimeFormat("en-US", {
-    timeZone: PARIS_TIME_ZONE,
-    month: "short"
-  })
-    .format(date)
-    .toLowerCase();
-
-  return `https://www.theguardian.com/football/results/${p.year}/${month}/${p.day}`;
-}
 
 function guardianDateLabel(date) {
   return new Intl.DateTimeFormat("en-GB", {
@@ -100,6 +140,7 @@ function guardianDateLabel(date) {
     year: "numeric"
   }).format(date);
 }
+
 
 function stripHtml(text = "") {
   return text
@@ -123,161 +164,135 @@ function stripHtml(text = "") {
     .trim();
 }
 
-function guardianLeagueId(name) {
-  const n = name.toLowerCase();
 
-  if (n.includes("champions league")) return 2;
-  if (n.includes("europa league")) return 3;
-  if (n.includes("conference league")) return 848;
-  if (n.includes("premier league")) return 39;
-  if (n.includes("la liga")) return 140;
-  if (n.includes("serie a")) return 135;
-  if (n.includes("bundesliga")) return 78;
-  if (n.includes("ligue 1")) return 61;
+/* ---------------------------------------------------------
+   GUARDIAN RESULTS
+--------------------------------------------------------- */
 
-  return null;
-}
+/*
+  Parse one Guardian competition page.
 
-/* -------------------------------------------------------
-   GUARDIAN DAILY RESULTS
-------------------------------------------------------- */
+  Example Guardian result:
 
-function parseGuardianResults(html, targetDate) {
-  const wanted = guardianDateLabel(targetDate);
+  FT Real Betis 10 Getafe
+
+  The two digits are the home and away score:
+  10 = 1-0
+  21 = 2-1
+  00 = 0-0
+  50 = 5-0
+*/
+function parseGuardianCompetition(html, targetDate, leagueId) {
+  const wantedDate = guardianDateLabel(targetDate);
 
   const tokens = [];
 
   const re =
     /<h2\b[^>]*>([\s\S]*?)<\/h2>|<h3\b[^>]*>([\s\S]*?)<\/h3>|<li\b[^>]*>([\s\S]*?)<\/li>/gi;
 
-  let m;
+  let match;
 
-  while ((m = re.exec(html))) {
-    if (m[1] != null) {
+  while ((match = re.exec(html))) {
+    if (match[1] !== undefined) {
       tokens.push({
         type: "date",
-        text: stripHtml(m[1])
+        text: stripHtml(match[1])
       });
-    } else if (m[2] != null) {
+    } else if (match[2] !== undefined) {
       tokens.push({
         type: "league",
-        text: stripHtml(m[2])
+        text: stripHtml(match[2])
       });
     } else {
       tokens.push({
         type: "result",
-        text: stripHtml(m[3])
+        text: stripHtml(match[3])
       });
     }
   }
 
-  let active = false;
-  let sawDate = false;
-  let league = "";
+  let activeDate = false;
 
   const events = [];
 
   for (const token of tokens) {
+
     if (token.type === "date") {
-      sawDate = true;
-      active = token.text.includes(wanted);
-
-      if (!active) {
-        league = "";
-      }
+      activeDate =
+        token.text.toLowerCase() === wantedDate.toLowerCase();
 
       continue;
     }
 
-    if (!active) continue;
-
-    if (token.type === "league") {
-      league = guardianLeagueId(token.text)
-        ? token.text
-        : "";
-
+    if (!activeDate) {
       continue;
     }
 
-    if (token.type !== "result" || !league) {
+    if (token.type !== "result") {
       continue;
     }
 
-    const match = token.text.match(
-      /^FT\s+(.+?)\s+(\d{2,3})\s+(.+)$/i
-    );
+    let text = token.text.trim();
 
-    if (!match) continue;
-
-    const scoreToken = match[2];
-
-    let homeScore;
-    let awayScore;
-
-    if (scoreToken.length === 2) {
-      homeScore = Number(scoreToken[0]);
-      awayScore = Number(scoreToken[1]);
-    } else {
-      const firstTwo = Number(
-        scoreToken.slice(0, 2)
-      );
-
-      if (firstTwo >= 10) {
-        homeScore = firstTwo;
-        awayScore = Number(
-          scoreToken.slice(2)
-        );
-      } else {
-        homeScore = Number(scoreToken[0]);
-        awayScore = Number(scoreToken.slice(1));
-      }
+    if (!/^FT\s+/i.test(text)) {
+      continue;
     }
 
-    const home = match[1].trim();
+    /*
+      Remove penalty-shootout text.
 
-    let away = match[3].trim();
+      Example:
+      FT Peterborough 33 Barnsley
+      Peterborough win 7-6 on penalties
+    */
 
-    away = away
+    text = text
       .replace(
-        /\s+[A-Z][A-Za-z .'-]*\s+win\s+\d+-\d+\s+on\s+penalties$/i,
+        /\s+[A-Za-z .'-]+?\s+win\s+\d+-\d+\s+on\s+penalties$/i,
         ""
       )
-      .replace(
-        /\s+\(AET\)$/i,
-        ""
-      )
+      .replace(/\s+\(AET\)$/i, "")
       .trim();
 
-    const leagueId =
-      guardianLeagueId(league);
+    /*
+      Match:
 
-    if (
-      !home ||
-      !away ||
-      !leagueId
-    ) {
+      FT Home 21 Away
+
+      The score is always two digits in the Guardian
+      result listings.
+    */
+
+    const resultMatch = text.match(
+      /^FT\s+(.+?)\s+(\d)(\d)\s+(.+?)$/i
+    );
+
+    if (!resultMatch) {
+      continue;
+    }
+
+    const home = resultMatch[1].trim();
+    const homeScore = Number(resultMatch[2]);
+    const awayScore = Number(resultMatch[3]);
+    const away = resultMatch[4].trim();
+
+    if (!home || !away) {
       continue;
     }
 
     events.push({
       id:
-        `guardian-${isoDateUTC(targetDate)}-${events.length + 1}`,
+        `guardian-${isoDateUTC(targetDate)}-` +
+        `${leagueId}-${events.length + 1}`,
 
-      date:
-        `${isoDateUTC(targetDate)}T12:00:00Z`,
+      date: `${isoDateUTC(targetDate)}T12:00:00Z`,
 
-      league:
-        LEAGUES[leagueId],
-
+      league: LEAGUES[leagueId],
       leagueId,
-
-      leagueCode:
-        String(leagueId),
+      leagueCode: String(leagueId),
 
       status: "FT",
-
-      statusLong:
-        "Match Finished",
+      statusLong: "Match Finished",
 
       homeTeam: {
         name: home,
@@ -296,28 +311,26 @@ function parseGuardianResults(html, targetDate) {
         away: awayScore
       },
 
-      source:
-        "The Guardian football results"
+      source: "The Guardian football results"
     });
-  }
-
-  if (!sawDate) {
-    // Exact-date URL fallback:
-    // parse the page's result blocks.
   }
 
   return events;
 }
 
-async function guardianScores(targetDate) {
-  const url =
-    guardianDateUrl(targetDate);
 
-  const res = await fetch(url, {
+/*
+  Fetch one Guardian competition.
+*/
+async function guardianCompetitionScores(
+  targetDate,
+  leagueId,
+  competition
+) {
+  const response = await fetch(competition.url, {
     headers: {
       "User-Agent":
         "YepFootball/1.0 (+https://yepfootball.com)",
-
       "Accept":
         "text/html,application/xhtml+xml"
     },
@@ -328,45 +341,102 @@ async function guardianScores(targetDate) {
     }
   });
 
-  if (!res.ok) {
+  if (!response.ok) {
     throw new Error(
-      `Guardian results ${res.status}`
+      `Guardian ${competition.name} ${response.status}`
     );
   }
 
-  const events =
-    parseGuardianResults(
-      await res.text(),
-      targetDate
+  const html = await response.text();
+
+  const events = parseGuardianCompetition(
+    html,
+    targetDate,
+    leagueId
+  );
+
+  return {
+    leagueId,
+    league: competition.name,
+    events,
+    url: competition.url
+  };
+}
+
+
+/*
+  Fetch all eight competitions.
+
+  Promise.allSettled means one failed Guardian page
+  doesn't prevent the other competitions from being read.
+*/
+async function guardianScores(targetDate) {
+  const entries = Object.entries(GUARDIAN_RESULTS);
+
+  const results = await Promise.allSettled(
+    entries.map(([leagueId, competition]) =>
+      guardianCompetitionScores(
+        targetDate,
+        Number(leagueId),
+        competition
+      )
+    )
+  );
+
+  const events = [];
+  const errors = [];
+
+  for (const result of results) {
+
+    if (result.status === "fulfilled") {
+      events.push(...result.value.events);
+    } else {
+      errors.push(
+        result.reason?.message ||
+        String(result.reason)
+      );
+    }
+  }
+
+  /*
+    Sort by league then team name so the display
+    remains stable.
+  */
+  events.sort((a, b) => {
+    if (a.leagueId !== b.leagueId) {
+      return a.leagueId - b.leagueId;
+    }
+
+    return a.homeTeam.name.localeCompare(
+      b.homeTeam.name
     );
+  });
 
   return {
     events,
     count: events.length,
     date: isoDateUTC(targetDate),
-
-    source:
-      "The Guardian football results",
-
-    sourceUrl: url,
-
-    publishedAt:
-      new Date().toISOString()
+    source: "The Guardian football results",
+    publishedAt: new Date().toISOString(),
+    errors
   };
 }
 
+
+/* ---------------------------------------------------------
+   DAILY SNAPSHOT / KV
+--------------------------------------------------------- */
+
 async function publishYesterday(env) {
+
   if (!env.LATEST_SCORES) {
     throw new Error(
       "Missing Cloudflare KV binding LATEST_SCORES"
     );
   }
 
-  const targetDate =
-    previousParisDate();
-
-  const dateKey =
-    isoDateUTC(targetDate);
+  const targetDate = previousParisDate();
+  const dateKey = isoDateUTC(targetDate);
 
   const existing =
     await env.LATEST_SCORES.get(
@@ -374,19 +444,53 @@ async function publishYesterday(env) {
       "json"
     );
 
+  /*
+    If today's snapshot has already been created,
+    don't repeatedly fetch Guardian every 15 minutes.
+  */
+  if (
+    existing &&
+    existing.date === dateKey
+  ) {
+    return {
+      ...existing,
+      alreadyPublished: true
+    };
+  }
+
   try {
+
     const snapshot =
       await guardianScores(targetDate);
 
-    if (!snapshot.events.length) {
-      return {
-        ...snapshot,
-        message:
-          "No completed matches recorded for the previous day.",
-        preserved:
-          Boolean(existing)
-      };
+    /*
+      If every Guardian request failed, preserve the
+      previous snapshot.
+    */
+    if (
+      snapshot.count === 0 &&
+      snapshot.errors.length ===
+        Object.keys(GUARDIAN_RESULTS).length
+    ) {
+
+      if (existing) {
+        return {
+          ...existing,
+          preserved: true,
+          sourceError:
+            snapshot.errors.join("; ")
+        };
+      }
+
+      throw new Error(
+        "Guardian results unavailable for all competitions"
+      );
     }
+
+    /*
+      A legitimate zero-result day is allowed if Guardian
+      responded successfully.
+    */
 
     await env.LATEST_SCORES.put(
       KV_KEY,
@@ -402,6 +506,11 @@ async function publishYesterday(env) {
 
   } catch (error) {
 
+    /*
+      NEVER erase a working snapshot because the source
+      temporarily failed.
+    */
+
     if (existing) {
       return {
         ...existing,
@@ -416,10 +525,9 @@ async function publishYesterday(env) {
   }
 }
 
-async function latestScores(
-  env,
-  league
-) {
+
+async function latestScores(env, league) {
+
   if (!env.LATEST_SCORES) {
     throw new Error(
       "Missing Cloudflare KV binding LATEST_SCORES"
@@ -436,25 +544,20 @@ async function latestScores(
     return {
       events: [],
       count: 0,
-
       message:
         "No daily score snapshot is available yet.",
-
-      updated:
-        new Date().toISOString()
+      updated: new Date().toISOString()
     };
   }
 
-  let events =
-    snapshot.events || [];
+  let events = snapshot.events || [];
 
   if (league) {
-    const id = Number(league);
+    const leagueId = Number(league);
 
-    events =
-      events.filter(
-        e => e.leagueId === id
-      );
+    events = events.filter(
+      event => event.leagueId === leagueId
+    );
   }
 
   return {
@@ -464,48 +567,48 @@ async function latestScores(
   };
 }
 
-/* -------------------------------------------------------
+
+/* ---------------------------------------------------------
    API-FOOTBALL
-   Used only for LIVE MATCH CENTRE
-------------------------------------------------------- */
+   MATCH CENTRE ONLY
+--------------------------------------------------------- */
 
 async function afFetch(
   path,
   env,
   cacheSeconds = 30
 ) {
+
   if (!env.API_FOOTBALL_KEY) {
     throw new Error(
       "Missing Cloudflare secret API_FOOTBALL_KEY"
     );
   }
 
-  const res = await fetch(
+  const response = await fetch(
     `${AF}${path}`,
     {
       headers: {
         "x-apisports-key":
           env.API_FOOTBALL_KEY,
-
         "Accept":
           "application/json"
       },
 
       cf: {
-        cacheTtl:
-          cacheSeconds,
-
+        cacheTtl: cacheSeconds,
         cacheEverything: true
       }
     }
   );
 
   const text =
-    await res.text();
+    await response.text();
 
-  if (!res.ok) {
+  if (!response.ok) {
     throw new Error(
-      `API-Football ${res.status}: ${text.slice(0, 250)}`
+      `API-Football ${response.status}: ` +
+      text.slice(0, 250)
     );
   }
 
@@ -518,7 +621,9 @@ async function afFetch(
   }
 }
 
+
 function normalizeAF(match) {
+
   const leagueId =
     Number(match.league?.id);
 
@@ -526,18 +631,15 @@ function normalizeAF(match) {
     match.fixture?.status || {};
 
   return {
-    id:
-      String(
-        match.fixture?.id || ""
-      ),
+    id: String(
+      match.fixture?.id || ""
+    ),
 
     date:
-      match.fixture?.date ||
-      null,
+      match.fixture?.date || null,
 
     timestamp:
-      match.fixture?.timestamp ||
-      null,
+      match.fixture?.timestamp || null,
 
     league:
       LEAGUES[leagueId] ||
@@ -563,16 +665,13 @@ function normalizeAF(match) {
         match.teams?.home?.id,
 
       name:
-        match.teams?.home?.name ||
-        "",
+        match.teams?.home?.name || "",
 
       shortName:
-        match.teams?.home?.name ||
-        "",
+        match.teams?.home?.name || "",
 
       crest:
-        match.teams?.home?.logo ||
-        ""
+        match.teams?.home?.logo || ""
     },
 
     awayTeam: {
@@ -580,16 +679,13 @@ function normalizeAF(match) {
         match.teams?.away?.id,
 
       name:
-        match.teams?.away?.name ||
-        "",
+        match.teams?.away?.name || "",
 
       shortName:
-        match.teams?.away?.name ||
-        "",
+        match.teams?.away?.name || "",
 
       crest:
-        match.teams?.away?.logo ||
-        ""
+        match.teams?.away?.logo || ""
     },
 
     score: {
@@ -602,7 +698,9 @@ function normalizeAF(match) {
   };
 }
 
+
 async function matchCentre(env) {
+
   const data =
     await afFetch(
       "/fixtures?live=all",
@@ -614,9 +712,9 @@ async function matchCentre(env) {
     (data.response || [])
       .map(normalizeAF)
       .filter(
-        e =>
-          e.leagueId &&
-          LEAGUES[e.leagueId]
+        event =>
+          event.leagueId &&
+          LEAGUES[event.leagueId]
       );
 
   return {
@@ -631,48 +729,50 @@ async function matchCentre(env) {
   };
 }
 
-/* -------------------------------------------------------
+
+/* ---------------------------------------------------------
    FOOTBALL-DATA.ORG
-   Used for FIXTURES
-------------------------------------------------------- */
+   FIXTURES ONLY
+--------------------------------------------------------- */
 
 async function fdFetch(
   path,
   env,
   cacheSeconds = 120
 ) {
+
   if (!env.FOOTBALL_DATA_TOKEN) {
     throw new Error(
       "Missing Cloudflare secret FOOTBALL_DATA_TOKEN"
     );
   }
 
-  const res = await fetch(
-    `${FD}${path}`,
-    {
-      headers: {
-        "X-Auth-Token":
-          env.FOOTBALL_DATA_TOKEN,
+  const response =
+    await fetch(
+      `${FD}${path}`,
+      {
+        headers: {
+          "X-Auth-Token":
+            env.FOOTBALL_DATA_TOKEN,
 
-        "Accept":
-          "application/json"
-      },
+          "Accept":
+            "application/json"
+        },
 
-      cf: {
-        cacheTtl:
-          cacheSeconds,
-
-        cacheEverything: true
+        cf: {
+          cacheTtl: cacheSeconds,
+          cacheEverything: true
+        }
       }
-    }
-  );
+    );
 
   const text =
-    await res.text();
+    await response.text();
 
-  if (!res.ok) {
+  if (!response.ok) {
     throw new Error(
-      `football-data.org ${res.status}: ${text.slice(0, 250)}`
+      `football-data.org ${response.status}: ` +
+      text.slice(0, 250)
     );
   }
 
@@ -685,7 +785,9 @@ async function fdFetch(
   }
 }
 
+
 function normalizeFD(match) {
+
   return {
     id:
       String(match.id),
@@ -715,8 +817,7 @@ function normalizeFD(match) {
         match.homeTeam?.id,
 
       name:
-        match.homeTeam?.name ||
-        "",
+        match.homeTeam?.name || "",
 
       shortName:
         match.homeTeam?.shortName ||
@@ -733,8 +834,7 @@ function normalizeFD(match) {
         match.awayTeam?.id,
 
       name:
-        match.awayTeam?.name ||
-        "",
+        match.awayTeam?.name || "",
 
       shortName:
         match.awayTeam?.shortName ||
@@ -751,9 +851,10 @@ function normalizeFD(match) {
   };
 }
 
+
 async function fixtures(env) {
-  const now =
-    new Date();
+
+  const now = new Date();
 
   const end =
     new Date(now);
@@ -762,21 +863,19 @@ async function fixtures(env) {
     end.getUTCDate() + 7
   );
 
-  const q =
+  const query =
     new URLSearchParams({
       competitions:
         Object.keys(FD_LEAGUES).join(","),
-
       dateFrom:
         isoDateUTC(now),
-
       dateTo:
         isoDateUTC(end)
     });
 
   const data =
     await fdFetch(
-      `/matches?${q.toString()}`,
+      `/matches?${query.toString()}`,
       env,
       120
     );
@@ -785,8 +884,8 @@ async function fixtures(env) {
     (data.matches || [])
       .map(normalizeFD)
       .filter(
-        e =>
-          new Date(e.date) >= now
+        event =>
+          new Date(event.date) >= now
       )
       .sort(
         (a, b) =>
@@ -809,11 +908,13 @@ async function fixtures(env) {
   };
 }
 
-/* -------------------------------------------------------
-   BBC SPORT NEWS
-------------------------------------------------------- */
+
+/* ---------------------------------------------------------
+   BBC NEWS
+--------------------------------------------------------- */
 
 function decodeEntities(text = "") {
+
   return text
     .replace(
       /<!\[CDATA\[([\s\S]*?)\]\]>/g,
@@ -828,9 +929,7 @@ function decodeEntities(text = "") {
     .replace(
       /&#(\d+);/g,
       (_, n) =>
-        String.fromCharCode(
-          Number(n)
-        )
+        String.fromCharCode(Number(n))
     )
     .replace(
       /&#x([0-9a-f]+);/gi,
@@ -841,10 +940,9 @@ function decodeEntities(text = "") {
     );
 }
 
-function xmlValue(
-  xml,
-  tag
-) {
+
+function xmlValue(xml, tag) {
+
   const re =
     new RegExp(
       `<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`,
@@ -861,7 +959,9 @@ function xmlValue(
     : "";
 }
 
+
 function parseBBCNews(xml) {
+
   const items = [];
 
   const matches =
@@ -915,21 +1015,17 @@ function parseBBCNews(xml) {
       );
 
     if (mediaContent) {
-      image =
-        mediaContent[1];
+      image = mediaContent[1];
     } else if (mediaThumbnail) {
-      image =
-        mediaThumbnail[1];
+      image = mediaThumbnail[1];
     } else if (enclosure) {
-      image =
-        enclosure[1];
+      image = enclosure[1];
     }
 
     items.push({
       title,
       link,
-      source:
-        "BBC Sport",
+      source: "BBC Sport",
       published,
 
       description:
@@ -948,8 +1044,10 @@ function parseBBCNews(xml) {
   return items;
 }
 
+
 async function news() {
-  const res =
+
+  const response =
     await fetch(
       BBC,
       {
@@ -968,26 +1066,23 @@ async function news() {
       }
     );
 
-  if (!res.ok) {
+  if (!response.ok) {
     throw new Error(
-      `BBC RSS ${res.status}`
+      `BBC RSS ${response.status}`
     );
   }
 
   const articles =
     parseBBCNews(
-      await res.text()
+      await response.text()
     ).slice(0, 12);
 
   return {
     articles,
-    count:
-      articles.length,
+    count: articles.length,
 
     source: {
-      name:
-        "BBC Sport",
-
+      name: "BBC Sport",
       url:
         "https://www.bbc.com/sport/football"
     },
@@ -997,11 +1092,13 @@ async function news() {
   };
 }
 
-/* -------------------------------------------------------
+
+/* ---------------------------------------------------------
    HEALTH
-------------------------------------------------------- */
+--------------------------------------------------------- */
 
 async function health(env) {
+
   const upstreams = {
     apiFootball:
       env.API_FOOTBALL_KEY
@@ -1023,9 +1120,9 @@ async function health(env) {
     ok:
       Object.values(upstreams)
         .every(
-          v =>
-            v === "configured" ||
-            v === "ok"
+          value =>
+            value === "configured" ||
+            value === "ok"
         ),
 
     upstreams,
@@ -1037,14 +1134,13 @@ async function health(env) {
   };
 }
 
-/* -------------------------------------------------------
-   REQUEST HANDLER
-------------------------------------------------------- */
 
-async function handle(
-  request,
-  env
-) {
+/* ---------------------------------------------------------
+   API ROUTING
+--------------------------------------------------------- */
+
+async function handle(request, env) {
+
   const url =
     new URL(request.url);
 
@@ -1058,6 +1154,7 @@ async function handle(
       10
     );
   }
+
 
   if (
     url.pathname ===
@@ -1075,6 +1172,7 @@ async function handle(
     );
   }
 
+
   if (
     url.pathname ===
     "/api/match-centre"
@@ -1085,6 +1183,7 @@ async function handle(
       20
     );
   }
+
 
   if (
     url.pathname ===
@@ -1097,6 +1196,7 @@ async function handle(
     );
   }
 
+
   if (
     url.pathname ===
     "/api/news"
@@ -1108,12 +1208,14 @@ async function handle(
     );
   }
 
+
   return null;
 }
 
-/* -------------------------------------------------------
-   CLOUDFLARE WORKER
-------------------------------------------------------- */
+
+/* ---------------------------------------------------------
+   WORKER
+--------------------------------------------------------- */
 
 export default {
 
@@ -1153,17 +1255,28 @@ export default {
           checked:
             new Date().toISOString()
         },
+
         502,
+
         30
       );
     }
   },
+
 
   async scheduled(
     event,
     env,
     ctx
   ) {
+
+    /*
+      Your cron is every 15 minutes.
+
+      publishYesterday() checks KV first, so after the
+      first successful publication it does NOT repeatedly
+      fetch Guardian every 15 minutes.
+    */
 
     ctx.waitUntil(
       publishYesterday(env)
