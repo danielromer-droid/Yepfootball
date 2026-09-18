@@ -185,6 +185,142 @@ function stripHtml(text = "") {
 function parseGuardianCompetition(html, targetDate, leagueId) {
   const wantedDate = guardianDateLabel(targetDate);
 
+  // Keep line breaks around headings and list items so the
+  // Guardian page structure survives HTML stripping.
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, "\n")
+    .replace(/<style[\s\S]*?<\/style>/gi, "\n")
+    .replace(/<\/(?:h1|h2|h3|h4|h5|h6|li|p|div|section|article)>/gi, "\n")
+    .replace(/<(?:h1|h2|h3|h4|h5|h6|li|p|div|section|article)[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_, n) =>
+      String.fromCharCode(Number(n))
+    )
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) =>
+      String.fromCharCode(parseInt(n, 16))
+    );
+
+  const lines = text
+    .split(/\n+/)
+    .map(x => x.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  const wanted = wantedDate.toLowerCase();
+
+  let active = false;
+  const events = [];
+
+  for (const line of lines) {
+
+    // Start of the required date.
+    if (line.toLowerCase().includes(wanted)) {
+      active = true;
+      continue;
+    }
+
+    // Stop when the next date heading is reached.
+    if (
+      active &&
+      /^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\d{1,2}\s+[A-Za-z]+\s+\d{4}$/i.test(line)
+    ) {
+      break;
+    }
+
+    if (!active) continue;
+
+    // We only want FT result lines.
+    if (!/^FT\s+/i.test(line)) continue;
+
+    let result = line
+      .replace(/^FT\s+/i, "")
+      .trim();
+
+    // Remove penalty information.
+    result = result
+      .replace(
+        /\s+[A-Za-z .'-]+?\s+win\s+\d+-\d+\s+on\s+penalties$/i,
+        ""
+      )
+      .replace(/\s+\(AET\)$/i, "")
+      .trim();
+
+    /*
+      Guardian format:
+
+      Real Betis 10 Getafe
+      Barcelona 72 Racing Santander
+      Juventus 50 NEC
+
+      The two digits immediately before the away team
+      are the score.
+    */
+    const match = result.match(
+      /^(.+?)\s+(\d)(\d)\s+(.+?)$/i
+    );
+
+    if (!match) continue;
+
+    const home = match[1].trim();
+    const homeScore = Number(match[2]);
+    const awayScore = Number(match[3]);
+    const away = match[4].trim();
+
+    if (!home || !away) continue;
+
+    events.push({
+      id:
+        `guardian-${isoDateUTC(targetDate)}-${leagueId}-${events.length + 1}`,
+
+      date:
+        `${isoDateUTC(targetDate)}T12:00:00Z`,
+
+      league:
+        LEAGUES[leagueId],
+
+      leagueId,
+
+      leagueCode:
+        String(leagueId),
+
+      status:
+        "FT",
+
+      statusLong:
+        "Match Finished",
+
+      homeTeam: {
+        name: home,
+        shortName: home,
+        crest: ""
+      },
+
+      awayTeam: {
+        name: away,
+        shortName: away,
+        crest: ""
+      },
+
+      score: {
+        home: homeScore,
+        away: awayScore
+      },
+
+      source:
+        "The Guardian football results"
+    });
+  }
+
+  return events;
+}
+  const wantedDate = guardianDateLabel(targetDate);
+
   const tokens = [];
 
   const re =
