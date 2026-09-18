@@ -3,9 +3,18 @@
   "name": "falling-morning-0e00",
   "main": "src/index.js",
   "compatibility_date": "2026-09-10",
+
   "assets": {
     "directory": "./public"
   },
+
+  "kv_namespaces": [
+    {
+      "binding": "LATEST_SCORES",
+      "id": "cdbc8dfd04c24dde8e277d7f66bd67e0"
+    }
+  ],
+
   "triggers": {
     "crons": ["*/15 * * * *"]
   }
