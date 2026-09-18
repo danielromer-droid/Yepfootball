@@ -1,85 +1,234 @@
+/* =====================================================
+   YepFootball - Frontend
+   Scores / Fixtures / BBC News
+===================================================== */
+
+
+/* =====================================================
+   LEAGUES
+===================================================== */
+
 const leagues = {
-  all: { name: "All Europe", id: null },
-  ucl: { name: "Champions League", id: 2 },
-  europa: { name: "Europa League", id: 3 },
-  conference: { name: "Conference League", id: 848 },
-  epl: { name: "Premier League", id: 39 },
-  laliga: { name: "La Liga", id: 140 },
-  seriea: { name: "Serie A", id: 135 },
-  bundesliga: { name: "Bundesliga", id: 78 },
-  ligue1: { name: "Ligue 1", id: 61 }
+
+  all: {
+    name: "All Europe",
+    id: null
+  },
+
+  ucl: {
+    name: "Champions League",
+    id: 2
+  },
+
+  europa: {
+    name: "Europa League",
+    id: 3
+  },
+
+  conference: {
+    name: "Conference League",
+    id: 848
+  },
+
+  epl: {
+    name: "Premier League",
+    id: 39
+  },
+
+  laliga: {
+    name: "La Liga",
+    id: 140
+  },
+
+  seriea: {
+    name: "Serie A",
+    id: 135
+  },
+
+  bundesliga: {
+    name: "Bundesliga",
+    id: 78
+  },
+
+  ligue1: {
+    name: "Ligue 1",
+    id: 61
+  }
+
 };
+
+
+/* =====================================================
+   STATE
+===================================================== */
 
 let selected = "all";
 
-const $ = s => document.querySelector(s);
+
+/* =====================================================
+   HELPERS
+===================================================== */
+
+const $ = selector =>
+  document.querySelector(selector);
+
+
+function esc(value) {
+
+  return String(value ?? "")
+    .replace(
+      /[&<>"']/g,
+      character => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[character])
+    );
+
+}
+
+
+function fmtDate(value) {
+
+  try {
+
+    return new Date(value)
+      .toLocaleString(
+        undefined,
+        {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit"
+        }
+      );
+
+  }
+
+  catch {
+
+    return value;
+
+  }
+
+}
+
+
+function fmtNewsDate(value) {
+
+  try {
+
+    return new Date(value)
+      .toLocaleString(
+        undefined,
+        {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit"
+        }
+      );
+
+  }
+
+  catch {
+
+    return value || "Latest";
+
+  }
+
+}
+
+
+async function getJSON(url) {
+
+  const response =
+    await fetch(
+      url,
+      {
+        headers: {
+          "Accept": "application/json"
+        }
+      }
+    );
+
+  if (!response.ok) {
+
+    throw new Error(
+      `HTTP ${response.status}`
+    );
+
+  }
+
+  return response.json();
+
+}
+
+
+/* =====================================================
+   LEAGUE TABS
+===================================================== */
 
 function tabs() {
-  $("#league-tabs").innerHTML =
+
+  const container =
+    $("#league-tabs");
+
+  if (!container) {
+    return;
+  }
+
+
+  container.innerHTML =
     Object.entries(leagues)
-      .map(([k, v]) =>
-        `<button class="tab ${k === selected ? "active" : ""}"
-          data-league="${k}">
-          ${v.name}
-        </button>`
+      .map(
+        ([key, league]) =>
+
+          `
+          <button
+            class="tab ${key === selected ? "active" : ""}"
+            data-league="${esc(key)}"
+            type="button"
+          >
+            ${esc(league.name)}
+          </button>
+          `
       )
       .join("");
 
-  document.querySelectorAll(".tab").forEach(b => {
-    b.onclick = () => {
-      selected = b.dataset.league;
-      tabs();
-      loadScores();
-    };
-  });
-}
 
-function esc(s) {
-  return String(s ?? "").replace(
-    /[&<>"']/g,
-    c => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;"
-    }[c])
-  );
-}
+  container
+    .querySelectorAll(".tab")
+    .forEach(button => {
 
-function fmtDate(v) {
-  try {
-    return new Date(v).toLocaleString(undefined, {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit"
+      button.onclick = () => {
+
+        selected =
+          button.dataset.league;
+
+        tabs();
+
+        loadScores();
+
+      };
+
     });
-  } catch {
-    return v;
-  }
-}
 
-async function getJSON(url) {
-  const r = await fetch(url, {
-    headers: {
-      "Accept": "application/json"
-    }
-  });
-
-  if (!r.ok) {
-    throw Error(`HTTP ${r.status}`);
-  }
-
-  return r.json();
 }
 
 
 /* =====================================================
    LATEST SCORES
    New API format:
-   homeTeam / awayTeam / score
+
+   e.homeTeam.name
+   e.awayTeam.name
+   e.score.home
+   e.score.away
 ===================================================== */
 
 function eventCard(e) {
@@ -94,24 +243,41 @@ function eventCard(e) {
     e.awayTeam?.name ||
     "Away";
 
+
   const homeScore =
-    e.score?.home ?? "-";
+    e.score?.home ??
+    "-";
 
   const awayScore =
-    e.score?.away ?? "-";
+    e.score?.away ??
+    "-";
+
 
   const state =
     e.statusLong ||
     e.status ||
     "Full Time";
 
+
   return `
+
     <article class="score-card">
 
       <div class="score-meta">
-        <span>${esc(e.league || "Football")}</span>
-        <span>${esc(state)}</span>
+
+        <span>
+          ${esc(
+            e.league ||
+            "Football"
+          )}
+        </span>
+
+        <span>
+          ${esc(state)}
+        </span>
+
       </div>
+
 
       <div class="teams">
 
@@ -119,9 +285,13 @@ function eventCard(e) {
           ${esc(home)}
         </span>
 
+
         <strong class="score">
-          ${homeScore} — ${awayScore}
+          ${esc(homeScore)}
+          —
+          ${esc(awayScore)}
         </strong>
+
 
         <span>
           ${esc(away)}
@@ -130,7 +300,9 @@ function eventCard(e) {
       </div>
 
     </article>
+
   `;
+
 }
 
 
@@ -140,35 +312,66 @@ function eventCard(e) {
 
 async function loadScores() {
 
-  $("#scores-status").textContent =
-    "Loading…";
+  const status =
+    $("#scores-status");
+
+  const grid =
+    $("#scores-grid");
+
+
+  if (!grid) {
+    return;
+  }
+
+
+  if (status) {
+
+    status.textContent =
+      "Loading…";
+
+  }
+
 
   try {
 
     const data =
-      await getJSON("/api/scores");
+      await getJSON(
+        "/api/scores"
+      );
+
 
     let events =
       data.events || [];
 
 
-    /* Filter locally by league */
+    /* -----------------------------------------------
+       Filter selected competition
+    ------------------------------------------------ */
 
-    if (selected !== "all") {
+    if (
+      selected !== "all"
+    ) {
 
       const leagueId =
         leagues[selected].id;
 
+
       events =
         events.filter(
-          e =>
-            Number(e.leagueId) ===
+          event =>
+            Number(event.leagueId) ===
             Number(leagueId)
         );
+
     }
 
 
-    $("#scores-grid").innerHTML =
+    /* -----------------------------------------------
+       Display results
+    ------------------------------------------------ */
+
+    grid.innerHTML =
+
       events.length
 
         ? events
@@ -182,20 +385,54 @@ async function loadScores() {
         `;
 
 
-    $("#scores-status").textContent =
-      `Updated ${new Date().toLocaleTimeString(
-        [],
-        {
-          hour: "2-digit",
-          minute: "2-digit"
-        }
-      )}`;
+    /* -----------------------------------------------
+       Accurate update time
+    ------------------------------------------------ */
+
+    if (status) {
+
+      if (data.publishedAt) {
+
+        status.textContent =
+          `Last updated ${new Date(
+            data.publishedAt
+          ).toLocaleTimeString(
+            [],
+            {
+              hour: "2-digit",
+              minute: "2-digit"
+            }
+          )}`;
+
+      }
+
+      else {
+
+        status.textContent =
+          `Updated ${new Date()
+            .toLocaleTimeString(
+              [],
+              {
+                hour: "2-digit",
+                minute: "2-digit"
+              }
+            )}`;
+
+      }
+
+    }
 
   }
 
-  catch (e) {
+  catch (error) {
 
-    $("#scores-grid").innerHTML =
+    console.error(
+      "Scores error:",
+      error
+    );
+
+
+    grid.innerHTML =
       `
         <div class="empty">
           Scores are temporarily unavailable.
@@ -203,67 +440,100 @@ async function loadScores() {
         </div>
       `;
 
-    $("#scores-status").textContent =
-      "Feed unavailable";
+
+    if (status) {
+
+      status.textContent =
+        "Feed unavailable";
+
+    }
+
   }
+
 }
 
 
 /* =====================================================
    FIXTURES
+   New API format:
+
+   e.homeTeam.name
+   e.awayTeam.name
 ===================================================== */
 
 function fixtureCard(e) {
 
-  const c =
-    e.competitions?.[0];
+  const home =
+    e.homeTeam?.shortName ||
+    e.homeTeam?.name ||
+    "Home";
 
-  const a =
-    c?.competitors?.find(
-      x => x.homeAway === "home"
-    );
+  const away =
+    e.awayTeam?.shortName ||
+    e.awayTeam?.name ||
+    "Away";
 
-  const b =
-    c?.competitors?.find(
-      x => x.homeAway === "away"
-    );
+
+  const league =
+    e.league ||
+    "European football";
+
 
   return `
+
     <article class="fixture-card">
 
       <div class="fixture-date">
-        ${fmtDate(e.date)}
+        ${esc(
+          fmtDate(e.date)
+        )}
       </div>
+
 
       <div class="fixture-teams">
-        ${esc(
-          a?.team?.displayName ||
-          "Home"
-        )}
 
-        <br>
-        vs
-        <br>
+        <span>
+          ${esc(home)}
+        </span>
 
-        ${esc(
-          b?.team?.displayName ||
-          "Away"
-        )}
+
+        <strong>
+          vs
+        </strong>
+
+
+        <span>
+          ${esc(away)}
+        </span>
+
       </div>
 
+
       <div class="fixture-league">
-        ${esc(
-          e.league ||
-          "European football"
-        )}
+        ${esc(league)}
       </div>
 
     </article>
+
   `;
+
 }
 
 
+/* =====================================================
+   LOAD FIXTURES
+===================================================== */
+
 async function loadFixtures() {
+
+  const grid =
+    $("#fixtures-grid");
+
+
+  if (!grid) {
+    return;
+  }
+
 
   try {
 
@@ -272,10 +542,13 @@ async function loadFixtures() {
         "/api/fixtures"
       );
 
+
     const events =
       data.events || [];
 
-    $("#fixtures-grid").innerHTML =
+
+    grid.innerHTML =
+
       events.length
 
         ? events
@@ -290,23 +563,143 @@ async function loadFixtures() {
 
   }
 
-  catch (e) {
+  catch (error) {
 
-    $("#fixtures-grid").innerHTML =
+    console.error(
+      "Fixtures error:",
+      error
+    );
+
+
+    grid.innerHTML =
       `
         <div class="empty">
           Fixtures are temporarily unavailable.
         </div>
       `;
+
   }
+
 }
 
 
 /* =====================================================
-   BBC NEWS
+   BBC NEWS CARD
+===================================================== */
+
+function newsCard(article) {
+
+  const image =
+    article.image ||
+    "";
+
+
+  const imageHTML =
+    image
+
+      ? `
+        <img
+          src="${esc(image)}"
+          alt="${esc(article.title)}"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+          style="
+            width:100%;
+            height:180px;
+            object-fit:cover;
+            display:block;
+            border-radius:8px 8px 0 0;
+          "
+          onerror="this.style.display='none'"
+        >
+        `
+
+      : "";
+
+
+  return `
+
+    <a
+      class="news-card"
+      href="${esc(article.link)}"
+      target="_blank"
+      rel="noopener"
+      style="
+        overflow:hidden;
+        display:flex;
+        flex-direction:column;
+      "
+    >
+
+      ${imageHTML}
+
+
+      <div
+        style="
+          padding:16px;
+          flex:1;
+          display:flex;
+          flex-direction:column;
+          justify-content:space-between;
+        "
+      >
+
+        <div>
+
+          <small>
+            ${esc(
+              article.source ||
+              "BBC Sport"
+            )}
+          </small>
+
+
+          <h3>
+            ${esc(
+              article.title
+            )}
+          </h3>
+
+        </div>
+
+
+        <span class="source">
+
+          ${
+            article.published
+              ? esc(
+                  fmtNewsDate(
+                    article.published
+                  )
+                )
+              : "Latest"
+          }
+
+        </span>
+
+      </div>
+
+    </a>
+
+  `;
+
+}
+
+
+/* =====================================================
+   LOAD BBC NEWS
 ===================================================== */
 
 async function loadNews() {
+
+  const grid =
+    $("#news-grid");
+
+
+  if (!grid) {
+    return;
+  }
+
 
   try {
 
@@ -315,50 +708,18 @@ async function loadNews() {
         "/api/news"
       );
 
-    const items =
+
+    const articles =
       data.articles || [];
 
-    $("#news-grid").innerHTML =
-      items.length
 
-        ? items
+    grid.innerHTML =
+
+      articles.length
+
+        ? articles
             .slice(0, 9)
-            .map(
-              n =>
-                `
-                <a
-                  class="news-card"
-                  href="${esc(n.link)}"
-                  target="_blank"
-                  rel="noopener"
-                >
-
-                  <div>
-
-                    <small>
-                      ${esc(
-                        n.source ||
-                        "Football news"
-                      )}
-                    </small>
-
-                    <h3>
-                      ${esc(n.title)}
-                    </h3>
-
-                  </div>
-
-                  <span class="source">
-                    ${
-                      n.published
-                        ? fmtDate(n.published)
-                        : "Latest"
-                    }
-                  </span>
-
-                </a>
-                `
-            )
+            .map(newsCard)
             .join("")
 
         : `
@@ -369,20 +730,56 @@ async function loadNews() {
 
   }
 
-  catch (e) {
+  catch (error) {
 
-    $("#news-grid").innerHTML =
+    console.error(
+      "News error:",
+      error
+    );
+
+
+    grid.innerHTML =
       `
         <div class="empty">
           News feed is temporarily unavailable.
         </div>
       `;
+
   }
+
 }
 
 
 /* =====================================================
-   START
+   PAGE UPDATE TIME
+===================================================== */
+
+function updatePageTime() {
+
+  const element =
+    $("#updated");
+
+
+  if (!element) {
+    return;
+  }
+
+
+  element.textContent =
+    `Last checked ${new Date()
+      .toLocaleTimeString(
+        [],
+        {
+          hour: "2-digit",
+          minute: "2-digit"
+        }
+      )}`;
+
+}
+
+
+/* =====================================================
+   START APPLICATION
 ===================================================== */
 
 document.addEventListener(
@@ -391,35 +788,52 @@ document.addEventListener(
 
     tabs();
 
-    $("#year").textContent =
-      new Date().getFullYear();
+
+    const year =
+      $("#year");
+
+    if (year) {
+
+      year.textContent =
+        new Date().getFullYear();
+
+    }
+
 
     loadScores();
+
     loadFixtures();
+
     loadNews();
 
-    $("#updated").textContent =
-      `Last checked ${new Date().toLocaleTimeString(
-        [],
-        {
-          hour: "2-digit",
-          minute: "2-digit"
-        }
-      )}`;
+    updatePageTime();
+
+
+    /* -----------------------------------------------
+       Automatic refresh
+    ------------------------------------------------ */
 
     setInterval(
       loadScores,
       120000
     );
 
+
     setInterval(
       loadFixtures,
       900000
     );
 
+
     setInterval(
       loadNews,
       1800000
+    );
+
+
+    setInterval(
+      updatePageTime,
+      60000
     );
 
   }
