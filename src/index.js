@@ -1,2193 +1,1261 @@
 /* =====================================================
    YepFootball Worker
+   Version: 2026-09-19.3
 
-   Secrets:
-   - API_FOOTBALL_KEY
-   - FOOTBALL_DATA_TOKEN
-
-   KV:
-   - LATEST_SCORES -> YepFootball Scores
-
-   Cron:
-   - Every 15 minutes
-
-   DAILY LATEST SCORES:
-   - Soccerbase
-   - Yesterday's completed results
-   - Stored permanently in KV
+   - Static website via Cloudflare Assets
+   - /api/* handled by Worker
+   - Latest Scores:
+       Soccerbase + football-data.org
+   - Match Centre:
+       API-Football
+   - Fixtures:
+       football-data.org
+   - News:
+       BBC Sport RSS
+   - Persistent daily snapshot:
+       Cloudflare KV
 ===================================================== */
 
-const AF = "https://v3.football.api-sports.io";
-const FD = "https://api.football-data.org/v4";
-const BBC = "https://feeds.bbci.co.uk/sport/football/rss.xml";
+const VERSION = "2026-09-19.3";
 
-const SOCCERBASE =
+const TZ = "Europe/Paris";
+
+const SOCCERBASE_RESULTS =
   "https://www.soccerbase.com/matches/results.sd";
 
+const FOOTBALL_DATA_API =
+  "https://api.football-data.org/v4";
 
-/* =====================================================
-   FOOTBALL-DATA.ORG LEAGUES
-===================================================== */
+const API_FOOTBALL_API =
+  "https://v3.football.api-sports.io";
 
-const FD_LEAGUES = {
-  CL: "Champions League",
-  PL: "Premier League",
-  PD: "La Liga",
-  SA: "Serie A",
-  BL1: "Bundesliga",
-  FL1: "Ligue 1"
+const BBC_RSS =
+  "https://feeds.bbci.co.uk/sport/football/rss.xml";
+
+/* -----------------------------------------------------
+   Competitions
+----------------------------------------------------- */
+
+const COMPETITIONS = {
+  PL: {
+    name: "Premier League",
+    id: 39
+  },
+
+  PD: {
+    name: "La Liga",
+    id: 140
+  },
+
+  SA: {
+    name: "Serie A",
+    id: 135
+  },
+
+  BL1: {
+    name: "Bundesliga",
+    id: 78
+  },
+
+  FL1: {
+    name: "Ligue 1",
+    id: 61
+  },
+
+  CL: {
+    name: "Champions League",
+    id: 2
+  },
+
+  EL: {
+    name: "Europa League",
+    id: 3
+  },
+
+  ECL: {
+    name: "Conference League",
+    id: 848
+  }
 };
 
+const FOOTBALL_DATA_COMPETITIONS =
+  "PL,PD,SA,BL1,FL1,CL,EL";
 
-/* =====================================================
-   API-FOOTBALL LEAGUES
-===================================================== */
+const SOCCERBASE_LEAGUES = {
+  "Premier League": COMPETITIONS.PL,
+  "Italian Serie A": COMPETITIONS.SA,
+  "German Bundesliga": COMPETITIONS.BL1,
+  "Spanish La Liga": COMPETITIONS.PD,
+  "French Ligue 1": COMPETITIONS.FL1,
 
-const AF_LEAGUES = {
-  2: "Champions League",
-  3: "Europa League",
-  848: "Conference League",
-  39: "Premier League",
-  140: "La Liga",
-  135: "Serie A",
-  78: "Bundesliga",
-  61: "Ligue 1"
+  "Champions League": COMPETITIONS.CL,
+  "European Cup": COMPETITIONS.CL,
+
+  "Europa League": COMPETITIONS.EL,
+
+  "Europa Conference League": COMPETITIONS.ECL,
+  "Conference League": COMPETITIONS.ECL
 };
 
+/* -----------------------------------------------------
+   Generic helpers
+----------------------------------------------------- */
 
-/* =====================================================
-   LEAGUE IDS
-===================================================== */
-
-const LEAGUE_IDS = {
-  "Premier League": 39,
-  "La Liga": 140,
-  "Serie A": 135,
-  "Bundesliga": 78,
-  "Ligue 1": 61,
-  "Champions League": 2,
-  "Europa League": 3,
-  "Conference League": 848
-};
-
-
-/* =====================================================
-   JSON RESPONSE
-===================================================== */
-
-function json(data, status = 200, maxAge = 60) {
-
-  return new Response(
-    JSON.stringify(data),
-    {
-      status,
-
-      headers: {
-        "content-type":
-          "application/json; charset=utf-8",
-
-        "cache-control":
-          `public, max-age=${maxAge}`,
-
-        "access-control-allow-origin":
-          "*"
-      }
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
     }
-  );
+  });
 }
 
-
-/* =====================================================
-   PARIS DATE
-===================================================== */
-
-function parisParts(d = new Date()) {
-
-  const parts =
-    new Intl.DateTimeFormat(
-      "en-GB",
-      {
-        timeZone: "Europe/Paris",
-
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-
-        hourCycle: "h23"
-      }
-    ).formatToParts(d);
-
-
-  const out = {};
-
-
-  for (const p of parts) {
-
-    if (p.type !== "literal") {
-
-      out[p.type] = p.value;
-
-    }
-
-  }
-
-
-  return out;
+function nowISO() {
+  return new Date().toISOString();
 }
 
-
-/* =====================================================
-   PREVIOUS PARIS DATE
-===================================================== */
-
-function previousParisDate(
-  d = new Date()
+/*
+   IMPORTANT:
+   Every external request has a timeout.
+   This prevents the Worker from hanging.
+*/
+async function fetchWithTimeout(
+  url,
+  options = {},
+  timeoutMs = 8000
 ) {
+  const controller = new AbortController();
 
-  const p =
-    parisParts(d);
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
 
-
-  const x =
-    new Date(
-      Date.UTC(
-        Number(p.year),
-        Number(p.month) - 1,
-        Number(p.day),
-        12
-      )
-    );
-
-
-  x.setUTCDate(
-    x.getUTCDate() - 1
-  );
-
-
-  return x
-    .toISOString()
-    .slice(0, 10);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-
-/* =====================================================
-   API-FOOTBALL
-===================================================== */
-
-async function afFetch(
-  path,
-  env,
-  ttl = 60
-) {
-
-  if (!env.API_FOOTBALL_KEY) {
-
-    throw new Error(
-      "Missing Cloudflare secret API_FOOTBALL_KEY"
-    );
-
-  }
-
-
-  const r =
-    await fetch(
-      `${AF}${path}`,
-      {
-        headers: {
-
-          "x-apisports-key":
-            env.API_FOOTBALL_KEY,
-
-          Accept:
-            "application/json"
-
-        },
-
-        cf: {
-          cacheTtl: ttl,
-          cacheEverything: true
-        }
-
-      }
-    );
-
-
-  const text =
-    await r.text();
-
-
-  if (!r.ok) {
-
-    throw new Error(
-      `API-Football ${r.status}: ${text.slice(0, 400)}`
-    );
-
-  }
-
-
-  const data =
-    JSON.parse(text);
-
-
-  if (
-    data.errors &&
-    Object.keys(data.errors).length
-  ) {
-
-    throw new Error(
-      `API-Football error: ${JSON.stringify(data.errors)}`
-    );
-
-  }
-
-
-  return data;
-}
-
-
-/* =====================================================
-   FOOTBALL-DATA.ORG
-===================================================== */
-
-async function fdFetch(
-  path,
-  env,
-  ttl = 300
-) {
-
-  if (!env.FOOTBALL_DATA_TOKEN) {
-
-    throw new Error(
-      "Missing Cloudflare secret FOOTBALL_DATA_TOKEN"
-    );
-
-  }
-
-
-  const r =
-    await fetch(
-      `${FD}${path}`,
-      {
-        headers: {
-
-          "X-Auth-Token":
-            env.FOOTBALL_DATA_TOKEN,
-
-          Accept:
-            "application/json"
-
-        },
-
-        cf: {
-          cacheTtl: ttl,
-          cacheEverything: true
-        }
-
-      }
-    );
-
-
-  const text =
-    await r.text();
-
-
-  if (!r.ok) {
-
-    throw new Error(
-      `football-data.org ${r.status}: ${text.slice(0, 300)}`
-    );
-
-  }
-
-
-  return JSON.parse(text);
-}
-
-
-/* =====================================================
-   API-FOOTBALL NORMALISATION
-===================================================== */
-
-function afNorm(x) {
-
-  const s =
-    x.fixture?.status || {};
-
-  const h =
-    x.teams?.home || {};
-
-  const a =
-    x.teams?.away || {};
-
-  const lid =
-    Number(x.league?.id);
-
-
-  return {
-
-    id:
-      String(x.fixture?.id),
-
-    date:
-      x.fixture?.date || null,
-
-    status:
-      s.short || "",
-
-    statusLong:
-      s.long || "",
-
-    minute:
-      s.elapsed ?? null,
-
-    live:
-      [
-        "1H",
-        "HT",
-        "2H",
-        "ET",
-        "BT",
-        "P",
-        "LIVE"
-      ].includes(s.short),
-
-    league:
-      AF_LEAGUES[lid] ||
-      x.league?.name ||
-      "European football",
-
-    leagueCode:
-      String(lid || ""),
-
-    leagueId:
-      lid,
-
-    homeTeam: {
-
-      id:
-        h.id,
-
-      name:
-        h.name || "",
-
-      shortName:
-        h.name || "",
-
-      crest:
-        h.logo || ""
-
-    },
-
-    awayTeam: {
-
-      id:
-        a.id,
-
-      name:
-        a.name || "",
-
-      shortName:
-        a.name || "",
-
-      crest:
-        a.logo || ""
-
-    },
-
-    score: {
-
-      home:
-        x.goals?.home ?? null,
-
-      away:
-        x.goals?.away ?? null
-
-    }
-
-  };
-}
-
-
-/* =====================================================
-   SOCCERBASE HTML HELPERS
-===================================================== */
-
-function decodeHtml(
-  text = ""
-) {
-
-  return text
-
-    .replace(
-      /&amp;/g,
-      "&"
-    )
-
-    .replace(
-      /&quot;/g,
-      '"'
-    )
-
-    .replace(
-      /&#39;/g,
-      "'"
-    )
-
-    .replace(
-      /&apos;/g,
-      "'"
-    )
-
-    .replace(
-      /&lt;/g,
-      "<"
-    )
-
-    .replace(
-      /&gt;/g,
-      ">"
-    )
-
-    .replace(
-      /&#(\d+);/g,
-      (_, n) =>
-        String.fromCharCode(+n)
-    )
-
-    .replace(
-      /&#x([0-9a-f]+);/gi,
-      (_, n) =>
-        String.fromCharCode(
-          parseInt(n, 16)
-        )
+function decodeEntities(value) {
+  return String(value || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#(\d+);/g, (_, n) =>
+      String.fromCharCode(Number(n))
     );
 }
 
-
-function stripTags(
-  text = ""
-) {
-
-  return decodeHtml(
-    text
-      .replace(
-        /<script[\s\S]*?<\/script>/gi,
-        " "
-      )
-      .replace(
-        /<style[\s\S]*?<\/style>/gi,
-        " "
-      )
-      .replace(
-        /<[^>]+>/g,
-        " "
-      )
+function stripTags(value) {
+  return decodeEntities(
+    String(value || "")
+      .replace(/<br\s*\/?>/gi, " ")
+      .replace(/<\/p>/gi, " ")
+      .replace(/<\/div>/gi, " ")
+      .replace(/<\/td>/gi, " ")
+      .replace(/<\/th>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
   )
-
-    .replace(
-      /\u00a0/g,
-      " "
-    )
-
-    .replace(
-      /\s+/g,
-      " "
-    )
-
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-
-/* =====================================================
-   SOCCERBASE TEAM NAME CLEANING
-===================================================== */
-
-function cleanTeamName(
-  name
-) {
-
-  return stripTags(name)
-
-    .replace(
-      /\s+/g,
-      " "
-    )
-
+function normalizeName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[.'’]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
-
 }
 
+function dedupeEvents(events) {
+  const map = new Map();
 
-/* =====================================================
-   SOCCERBASE LEAGUE DETECTION
-===================================================== */
+  for (const event of events) {
+    const key = [
+      event.date || "",
+      normalizeName(event.homeTeam?.name),
+      normalizeName(event.awayTeam?.name),
+      event.leagueId || ""
+    ].join("|");
 
-function detectLeague(
-  text
+    if (!map.has(key)) {
+      map.set(key, event);
+    }
+  }
+
+  return [...map.values()];
+}
+
+/* -----------------------------------------------------
+   Europe/Paris date helpers
+----------------------------------------------------- */
+
+function dateInParis(offsetDays = 0) {
+  const now = new Date();
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(now);
+
+  const year = Number(
+    parts.find(p => p.type === "year").value
+  );
+
+  const month = Number(
+    parts.find(p => p.type === "month").value
+  );
+
+  const day = Number(
+    parts.find(p => p.type === "day").value
+  );
+
+  const d = new Date(
+    Date.UTC(year, month - 1, day + offsetDays)
+  );
+
+  return d.toISOString().slice(0, 10);
+}
+
+/* -----------------------------------------------------
+   Soccerbase
+----------------------------------------------------- */
+
+async function soccerbaseDailyScores(date) {
+  const url =
+    `${SOCCERBASE_RESULTS}?date=${encodeURIComponent(date)}`;
+
+  const response = await fetchWithTimeout(
+    url,
+    {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 YepFootball/1.0",
+        "Accept":
+          "text/html,application/xhtml+xml"
+      }
+    },
+    8000
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Soccerbase HTTP ${response.status}`
+    );
+  }
+
+  const html = await response.text();
+
+  const events = [];
+
+  /*
+     Process headings and table rows in document order.
+  */
+  const blocks =
+    html.match(
+      /<h[1-6][^>]*>[\s\S]*?<\/h[1-6]>|<tr\b[^>]*>[\s\S]*?<\/tr>/gi
+    ) || [];
+
+  let currentLeague = null;
+
+  for (const block of blocks) {
+    if (/^<h[1-6]/i.test(block)) {
+      const heading = stripTags(block);
+
+      currentLeague =
+        SOCCERBASE_LEAGUES[heading] || null;
+
+      continue;
+    }
+
+    if (!currentLeague) continue;
+
+    const anchors = [
+      ...block.matchAll(
+        /<a\b[^>]*>([\s\S]*?)<\/a>/gi
+      )
+    ].map(match => stripTags(match[1]))
+     .filter(Boolean);
+
+    const scoreIndex = anchors.findIndex(
+      text => /^\d+\s*-\s*\d+$/.test(text)
+    );
+
+    if (
+      scoreIndex < 1 ||
+      scoreIndex >= anchors.length - 1
+    ) {
+      continue;
+    }
+
+    const home =
+      anchors[scoreIndex - 1];
+
+    const score =
+      anchors[scoreIndex];
+
+    const away =
+      anchors[scoreIndex + 1];
+
+    const match =
+      score.match(/(\d+)\s*-\s*(\d+)/);
+
+    if (!match) continue;
+
+    events.push({
+      date: `${date}T12:00:00+02:00`,
+      league: currentLeague.name,
+      leagueId: currentLeague.id,
+
+      homeTeam: {
+        name: home,
+        shortName: home,
+        crest: ""
+      },
+
+      awayTeam: {
+        name: away,
+        shortName: away,
+        crest: ""
+      },
+
+      score: {
+        home: Number(match[1]),
+        away: Number(match[2])
+      },
+
+      status: "FT",
+      statusLong: "Full Time"
+    });
+  }
+
+  return events;
+}
+
+/* -----------------------------------------------------
+   football-data.org
+----------------------------------------------------- */
+
+async function footballDataMatches(
+  env,
+  dateFrom,
+  dateTo
 ) {
-
-  const t =
-    text.toLowerCase();
-
-
-  if (
-    t.includes("premier league")
-  ) {
-    return "Premier League";
+  if (!env.FOOTBALL_DATA_TOKEN) {
+    return [];
   }
 
+  const url =
+    `${FOOTBALL_DATA_API}/matches` +
+    `?dateFrom=${dateFrom}` +
+    `&dateTo=${dateTo}` +
+    `&competitions=${FOOTBALL_DATA_COMPETITIONS}`;
 
-  if (
-    t.includes("la liga") ||
-    t.includes("laliga")
-  ) {
-    return "La Liga";
+  const response = await fetchWithTimeout(
+    url,
+    {
+      headers: {
+        "X-Auth-Token":
+          env.FOOTBALL_DATA_TOKEN,
+        "Accept":
+          "application/json"
+      }
+    },
+    7000
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `football-data HTTP ${response.status}`
+    );
   }
 
+  const data = await response.json();
 
-  if (
-    t.includes("serie a")
-  ) {
-    return "Serie A";
+  return (data.matches || []).map(match => {
+    const code =
+      match.competition?.code;
+
+    const competition =
+      COMPETITIONS[code];
+
+    if (!competition) {
+      return null;
+    }
+
+    const finished =
+      match.status === "FINISHED";
+
+    return {
+      date: match.utcDate,
+
+      league:
+        competition.name,
+
+      leagueId:
+        competition.id,
+
+      homeTeam: {
+        name:
+          match.homeTeam?.name || "Home",
+
+        shortName:
+          match.homeTeam?.shortName ||
+          match.homeTeam?.name ||
+          "Home",
+
+        crest:
+          match.homeTeam?.crest || ""
+      },
+
+      awayTeam: {
+        name:
+          match.awayTeam?.name || "Away",
+
+        shortName:
+          match.awayTeam?.shortName ||
+          match.awayTeam?.name ||
+          "Away",
+
+        crest:
+          match.awayTeam?.crest || ""
+      },
+
+      score: {
+        home:
+          finished
+            ? match.score?.fullTime?.home
+            : null,
+
+        away:
+          finished
+            ? match.score?.fullTime?.away
+            : null
+      },
+
+      status:
+        finished ? "FT" : match.status,
+
+      statusLong:
+        finished
+          ? "Full Time"
+          : match.status
+    };
+  }).filter(Boolean);
+}
+
+/* -----------------------------------------------------
+   Daily snapshot
+----------------------------------------------------- */
+
+async function readSnapshot(env) {
+  if (!env.LATEST_SCORES) {
+    return null;
   }
 
+  const keys = [
+    "latest_scores",
+    "yesterday_scores",
+    "latest",
+    "yesterday"
+  ];
 
-  if (
-    t.includes("bundesliga")
-  ) {
-    return "Bundesliga";
+  for (const key of keys) {
+    try {
+      const value =
+        await env.LATEST_SCORES.get(
+          key,
+          { type: "json" }
+        );
+
+      if (value) {
+        return value;
+      }
+    } catch {
+      // Continue to next key.
+    }
   }
-
-
-  if (
-    t.includes("ligue 1")
-  ) {
-    return "Ligue 1";
-  }
-
-
-  if (
-    t.includes("champions league")
-  ) {
-    return "Champions League";
-  }
-
-
-  if (
-    t.includes("europa league")
-  ) {
-    return "Europa League";
-  }
-
-
-  if (
-    t.includes("conference league")
-  ) {
-    return "Conference League";
-  }
-
 
   return null;
 }
 
-
-/* =====================================================
-   SOCCERBASE SCORE PARSER
-===================================================== */
-
-function parseSoccerbaseResults(
-  html,
-  targetDate
-) {
-
-  const events = [];
-
-
-  /*
-    Soccerbase pages contain many match rows.
-
-    We look for score patterns such as:
-
-       Team A  2 - 1  Team B
-
-    and then use nearby text to determine
-    the competition.
-  */
-
-
-  const rows =
-    html.match(
-      /<tr[\s\S]*?<\/tr>/gi
-    ) || [];
-
-
-  for (
-    const row of rows
-  ) {
-
-    const text =
-      stripTags(row);
-
-
-    if (!text) {
-      continue;
-    }
-
-
-    /*
-      Only completed matches.
-    */
-
-    const score =
-      text.match(
-        /(\d+)\s*[-–]\s*(\d+)/
-      );
-
-
-    if (!score) {
-      continue;
-    }
-
-
-    const homeScore =
-      Number(score[1]);
-
-    const awayScore =
-      Number(score[2]);
-
-
-    /*
-      Try to find team names around
-      the score.
-    */
-
-    const before =
-      text
-        .split(
-          score[0]
-        )[0]
-        .trim();
-
-
-    const after =
-      text
-        .split(
-          score[0]
-        )[1]
-        ?.trim() || "";
-
-
-    let home =
-      before
-        .replace(
-          /^.*?(?:FT|Full Time)\s*/i,
-          ""
-        )
-        .trim();
-
-
-    let away =
-      after
-        .replace(
-          /^.*?(?:FT|Full Time)\s*/i,
-          ""
-        )
-        .trim();
-
-
-    /*
-      Remove time information.
-    */
-
-    home =
-      home.replace(
-        /^\d{1,2}:\d{2}\s*/,
-        ""
-      );
-
-
-    away =
-      away.replace(
-        /^\d{1,2}:\d{2}\s*/,
-        ""
-      );
-
-
-    /*
-      Limit names to sensible lengths.
-    */
-
-    if (
-      !home ||
-      !away ||
-      home.length > 80 ||
-      away.length > 80
-    ) {
-      continue;
-    }
-
-
-    /*
-      Determine league.
-    */
-
-    const league =
-      detectLeague(text);
-
-
-    if (!league) {
-      continue;
-    }
-
-
-    /*
-      Avoid obvious navigation / table
-      text being interpreted as matches.
-    */
-
-    const bad =
-      [
-        "results",
-        "fixtures",
-        "matches",
-        "league table",
-        "football"
-      ];
-
-
-    if (
-      bad.includes(
-        home.toLowerCase()
-      ) ||
-      bad.includes(
-        away.toLowerCase()
-      )
-    ) {
-      continue;
-    }
-
-
-    events.push({
-
-      id:
-        `soccerbase-${targetDate}-${league}-${home}-${away}`
-          .replace(
-            /[^a-z0-9_-]+/gi,
-            "-"
-          ),
-
-      date:
-        `${targetDate}T12:00:00Z`,
-
-      status:
-        "FINISHED",
-
-      statusLong:
-        "Full Time",
-
-      minute:
-        null,
-
-      league,
-
-      leagueCode:
-        league,
-
-      leagueId:
-        LEAGUE_IDS[league] ||
-        null,
-
-      homeTeam: {
-
-        id:
-          null,
-
-        name:
-          home,
-
-        shortName:
-          home,
-
-        crest:
-          ""
-
-      },
-
-      awayTeam: {
-
-        id:
-          null,
-
-        name:
-          away,
-
-        shortName:
-          away,
-
-        crest:
-          ""
-
-      },
-
-      score: {
-
-        home:
-          homeScore,
-
-        away:
-          awayScore
-
-      }
-
-    });
-
-  }
-
-
-  /*
-    Remove duplicates.
-  */
-
-  const seen =
-    new Set();
-
-
-  return events.filter(
-    event => {
-
-      const key =
-        `${event.league}|${event.homeTeam.name}|${event.awayTeam.name}`
-          .toLowerCase();
-
-
-      if (seen.has(key)) {
-        return false;
-      }
-
-
-      seen.add(key);
-
-      return true;
-
-    }
-  );
-
-}
-
-
-/* =====================================================
-   SOCCERBASE DAILY RESULTS
-===================================================== */
-
-async function soccerbaseDailyScores(
-  env,
-  date
-) {
-
-  /*
-    IMPORTANT:
-    The date is explicitly passed to
-    Soccerbase.
-
-    Example:
-
-    results.sd?date=2026-09-18
-  */
-
-  const url =
-    `${SOCCERBASE}?date=${encodeURIComponent(date)}`;
-
-
-  const r =
-    await fetch(
-      url,
-      {
-        headers: {
-
-          "User-Agent":
-            "Mozilla/5.0 (compatible; YepFootball/1.0; +https://yepfootball.com)",
-
-          Accept:
-            "text/html,application/xhtml+xml,text/html"
-
-        },
-
-        cf: {
-
-          cacheTtl:
-            300,
-
-          cacheEverything:
-            true
-
-        }
-
-      }
-    );
-
-
-  if (!r.ok) {
-
+async function writeSnapshot(env, snapshot) {
+  if (!env.LATEST_SCORES) {
     throw new Error(
-      `Soccerbase ${r.status}`
+      "LATEST_SCORES KV binding is missing"
     );
-
   }
 
+  const value =
+    JSON.stringify(snapshot);
 
-  const html =
-    await r.text();
-
-
-  return parseSoccerbaseResults(
-    html,
-    date
-  );
-}
-
-
-/* =====================================================
-   FOOTBALL-DATA DAILY SCORES
-===================================================== */
-
-function fdDailyNorm(m) {
-
-  const status =
-    m.status || "";
-
-
-  if (
-    ![
-      "FINISHED",
-      "AWARDED"
-    ].includes(status)
-  ) {
-
-    return null;
-
-  }
-
-
-  const code =
-    m.competition?.code ||
-    "";
-
-
-  return {
-
-    id:
-      String(m.id),
-
-    date:
-      m.utcDate,
-
-    status,
-
-    statusLong:
-      status === "AWARDED"
-        ? "Awarded"
-        : "Full Time",
-
-    minute:
-      m.minute ?? null,
-
-    league:
-      FD_LEAGUES[code] ||
-      m.competition?.name ||
-      "European football",
-
-    leagueCode:
-      code,
-
-    leagueId:
-      LEAGUE_IDS[
-        FD_LEAGUES[code]
-      ] || null,
-
-    homeTeam: {
-
-      id:
-        m.homeTeam?.id,
-
-      name:
-        m.homeTeam?.name ||
-        "",
-
-      shortName:
-        m.homeTeam?.shortName ||
-        m.homeTeam?.name ||
-        "",
-
-      crest:
-        m.homeTeam?.crest ||
-        ""
-
-    },
-
-    awayTeam: {
-
-      id:
-        m.awayTeam?.id,
-
-      name:
-        m.awayTeam?.name ||
-        "",
-
-      shortName:
-        m.awayTeam?.shortName ||
-        m.awayTeam?.name ||
-        "",
-
-      crest:
-        m.awayTeam?.crest ||
-        ""
-
-    },
-
-    score: {
-
-      home:
-        m.score?.fullTime?.home ??
-        m.score?.home ??
-        null,
-
-      away:
-        m.score?.fullTime?.away ??
-        m.score?.away ??
-        null
-
+  /*
+     Keep the snapshot for 7 days.
+     This is intentionally longer than 24 hours
+     so a temporary source failure cannot erase it.
+  */
+  await env.LATEST_SCORES.put(
+    "latest_scores",
+    value,
+    {
+      expirationTtl: 604800
     }
-
-  };
-
-}
-
-
-async function footballDataDailyScores(
-  env,
-  date
-) {
-
-  const competitions =
-    Object.keys(
-      FD_LEAGUES
-    ).join(",");
-
-
-  const q =
-    new URLSearchParams({
-
-      competitions,
-
-      dateFrom:
-        date,
-
-      dateTo:
-        date,
-
-      status:
-        "FINISHED"
-
-    });
-
-
-  try {
-
-    const data =
-      await fdFetch(
-        `/matches?${q}`,
-        env,
-        300
-      );
-
-
-    return (
-      data.matches || []
-    )
-
-      .map(fdDailyNorm)
-
-      .filter(Boolean);
-
-  } catch (error) {
-
-    console.warn(
-      "football-data.org daily scores unavailable:",
-      error.message
-    );
-
-
-    return [];
-
-  }
-
-}
-
-
-/* =====================================================
-   DAILY SCORES COMBINATION
-===================================================== */
-
-async function dailyScores(
-  env,
-  date
-) {
-
-  /*
-    Soccerbase is the primary daily source.
-
-    football-data.org is supplementary.
-
-    We use Soccerbase first because it can
-    provide the exact requested date.
-  */
-
-  const [
-    soccerbase,
-    footballData
-  ] =
-    await Promise.all([
-
-      soccerbaseDailyScores(
-        env,
-        date
-      ).catch(error => {
-
-        console.warn(
-          "Soccerbase unavailable:",
-          error.message
-        );
-
-        return [];
-
-      }),
-
-      footballDataDailyScores(
-        env,
-        date
-      )
-
-    ]);
-
-
-  const all = [
-    ...soccerbase,
-    ...footballData
-  ];
-
-
-  /*
-    Remove duplicates.
-
-    Soccerbase entries are kept first.
-  */
-
-  const seen =
-    new Set();
-
-
-  const result =
-    all.filter(
-      event => {
-
-        const key =
-          [
-            event.league,
-            event.homeTeam.name,
-            event.awayTeam.name,
-            event.score.home,
-            event.score.away
-          ]
-            .join("|")
-            .toLowerCase();
-
-
-        if (seen.has(key)) {
-          return false;
-        }
-
-
-        seen.add(key);
-
-        return true;
-
-      }
-    );
-
-
-  return result.sort(
-    (a, b) =>
-      new Date(a.date) -
-      new Date(b.date)
   );
 
+  await env.LATEST_SCORES.put(
+    "yesterday_scores",
+    value,
+    {
+      expirationTtl: 604800
+    }
+  );
 }
-
-
-/* =====================================================
-   PUBLISH YESTERDAY
-===================================================== */
 
 async function publishYesterday(
   env,
   force = false
 ) {
-
-  if (!env.LATEST_SCORES) {
-
-    throw new Error(
-      "Missing Cloudflare KV binding LATEST_SCORES"
-    );
-
-  }
-
-
   const date =
-    previousParisDate();
-
-
-  const key =
-    `scores:${date}`;
-
+    dateInParis(-1);
 
   const existing =
-    await env.LATEST_SCORES.get(
-      key,
-      "json"
-    );
-
+    await readSnapshot(env);
 
   /*
-    If a good snapshot already exists,
-    keep it unless manually refreshed.
+     Do not repeatedly refresh the same successful
+     snapshot unless explicitly requested.
   */
-
   if (
     !force &&
     existing &&
-    Number(existing.count) > 0
+    existing.date === date &&
+    Array.isArray(existing.events)
   ) {
-
     return {
-
       ok: true,
-
-      skipped: true,
-
+      preserved: true,
       date,
-
-      count:
-        Number(existing.count),
-
+      count: existing.events.length,
       reason:
-        "Already published"
-
+        "Existing snapshot already covers yesterday"
     };
-
   }
 
+  const results =
+    await Promise.allSettled([
+      soccerbaseDailyScores(date),
 
-  const events =
-    await dailyScores(
-      env,
-      date
-    );
+      footballDataMatches(
+        env,
+        date,
+        date
+      )
+    ]);
 
+  const soccerbase =
+    results[0].status === "fulfilled"
+      ? results[0].value
+      : [];
+
+  const footballData =
+    results[1].status === "fulfilled"
+      ? results[1].value
+          .filter(e =>
+            e.status === "FT"
+          )
+      : [];
 
   /*
-    NEVER overwrite a good snapshot
-    with an empty response.
+     Soccerbase is the primary daily source.
+     football-data supplements it.
   */
+  const events =
+    dedupeEvents([
+      ...soccerbase,
+      ...footballData
+    ]);
 
-  if (
-    events.length === 0 &&
-    existing &&
-    Number(existing.count) > 0
-  ) {
-
+  /*
+     CRITICAL:
+     Never replace a good snapshot with an empty one.
+  */
+  if (!events.length) {
     return {
-
-      ok: true,
-
+      ok: false,
       preserved: true,
-
       date,
-
       count:
-        Number(existing.count),
-
+        existing?.events?.length || 0,
       reason:
-        "Sources returned no results; existing good snapshot preserved"
-
+        "Sources returned no usable results; existing snapshot preserved"
     };
-
   }
 
-
   const snapshot = {
+    ok: true,
+
+    version: VERSION,
+
+    date,
 
     events,
 
-    count:
-      events.length,
-
-    date,
+    count: events.length,
 
     source:
       "Soccerbase + football-data.org",
 
     publishedAt:
-      new Date().toISOString(),
+      nowISO(),
 
-    message:
-      events.length
-        ? null
-        : "No completed matches recorded for the previous day."
-
+    message: null
   };
 
-
-  await env.LATEST_SCORES.put(
-    key,
-    JSON.stringify(snapshot)
+  await writeSnapshot(
+    env,
+    snapshot
   );
 
-
-  await env.LATEST_SCORES.put(
-    "latest",
-    JSON.stringify(snapshot)
-  );
-
-
-  return snapshot;
-
+  return {
+    ok: true,
+    preserved: false,
+    date,
+    count: events.length,
+    source:
+      snapshot.source,
+    publishedAt:
+      snapshot.publishedAt
+  };
 }
 
+/* -----------------------------------------------------
+   Latest Scores API
+----------------------------------------------------- */
 
-/* =====================================================
-   LATEST SNAPSHOT
-===================================================== */
+async function scores(env, request) {
+  const url =
+    new URL(request.url);
 
-async function latest(env) {
+  const refresh =
+    url.searchParams.get("refresh") === "1";
 
-  if (!env.LATEST_SCORES) {
+  /*
+     Normal page requests only read KV.
+     This makes the website extremely fast and
+     protects the external sources.
+  */
+  if (!refresh) {
+    const snapshot =
+      await readSnapshot(env);
 
-    throw new Error(
-      "Missing Cloudflare KV binding LATEST_SCORES"
-    );
+    if (snapshot) {
+      return json(snapshot);
+    }
 
+    return json({
+      ok: true,
+      version: VERSION,
+      events: [],
+      count: 0,
+      date: dateInParis(-1),
+      source: "KV",
+      publishedAt: null,
+      message:
+        "No daily snapshot is available yet."
+    });
   }
 
+  /*
+     Manual refresh is deliberately protected
+     by the timeouts inside publishYesterday().
+  */
+  const refreshResult =
+    await publishYesterday(
+      env,
+      true
+    );
 
   const snapshot =
-    await env.LATEST_SCORES.get(
-      "latest",
-      "json"
-    );
+    await readSnapshot(env);
 
+  if (snapshot) {
+    return json({
+      ...snapshot,
+      refresh:
+        refreshResult
+    });
+  }
 
-  return snapshot || {
-
+  return json({
+    ok: false,
     events: [],
-
     count: 0,
-
-    date: null,
-
-    source:
-      "Cloudflare KV",
-
-    publishedAt:
-      null,
-
-    message:
-      "No daily snapshot is available yet."
-
-  };
-
+    date: dateInParis(-1),
+    refresh:
+      refreshResult
+  }, 503);
 }
 
+/* -----------------------------------------------------
+   Fixtures
+----------------------------------------------------- */
 
-/* =====================================================
-   LIVE MATCH CENTRE
-===================================================== */
+async function fixtures(env) {
+  if (!env.FOOTBALL_DATA_TOKEN) {
+    return json({
+      events: [],
+      count: 0,
+      message:
+        "Football-data token is not configured."
+    });
+  }
 
-async function matchCentre(
-  env
-) {
+  /*
+     Cache fixtures for 10 minutes.
+  */
+  if (env.LATEST_SCORES) {
+    try {
+      const cached =
+        await env.LATEST_SCORES.get(
+          "fixtures_cache",
+          { type: "json" }
+        );
 
-  const data =
-    await afFetch(
-      "/fixtures?live=all&timezone=Europe/Paris",
-      env,
-      60
-    );
+      if (
+        cached &&
+        cached.expiresAt >
+          Date.now()
+      ) {
+        return json(cached.data);
+      }
+    } catch {
+      // Ignore cache failure.
+    }
+  }
 
+  const from =
+    dateInParis(0);
 
-  const events =
-    (data.response || [])
+  const to =
+    dateInParis(7);
 
-      .filter(
-        x =>
-          AF_LEAGUES[
-            Number(x.league?.id)
-          ]
-      )
-
-      .map(afNorm)
-
-      .filter(
-        x => x.live
-      )
-
-      .sort(
-        (a, b) =>
-          new Date(a.date) -
-          new Date(b.date)
+  try {
+    const matches =
+      await footballDataMatches(
+        env,
+        from,
+        to
       );
 
+    const events =
+      matches
+        .filter(e =>
+          e.status !== "FINISHED"
+        )
+        .sort(
+          (a, b) =>
+            new Date(a.date) -
+            new Date(b.date)
+        );
 
-  return {
-
-    events,
-
-    live:
+    const data = {
+      ok: true,
       events,
+      count: events.length,
+      updated:
+        nowISO()
+    };
 
-    finished:
-      [],
+    if (env.LATEST_SCORES) {
+      try {
+        await env.LATEST_SCORES.put(
+          "fixtures_cache",
+          JSON.stringify({
+            expiresAt:
+              Date.now() +
+              10 * 60 * 1000,
+            data
+          }),
+          {
+            expirationTtl: 900
+          }
+        );
+      } catch {
+        // Cache failure must not break fixtures.
+      }
+    }
 
-    upcoming:
-      [],
+    return json(data);
 
-    count:
-      events.length,
-
-    liveCount:
-      events.length,
-
-    source:
-      "API-Football",
-
-    updated:
-      new Date().toISOString()
-
-  };
-
+  } catch (error) {
+    return json({
+      ok: false,
+      events: [],
+      count: 0,
+      message:
+        error?.message ||
+        "Fixtures unavailable"
+    }, 502);
+  }
 }
 
+/* -----------------------------------------------------
+   API-Football Match Centre
+----------------------------------------------------- */
 
-/* =====================================================
-   FIXTURE NORMALISATION
-===================================================== */
+async function apiFootballMatches(env) {
+  if (!env.API_FOOTBALL_KEY) {
+    return {
+      ok: false,
+      events: [],
+      live: [],
+      finished: [],
+      upcoming: [],
+      message:
+        "API_FOOTBALL_KEY is not configured."
+    };
+  }
 
-function fdNorm(m) {
+  const url =
+    `${API_FOOTBALL_API}/fixtures` +
+    `?live=39-2-3-848-140-135-78-61`;
 
-  return {
+  const response =
+    await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          "x-apisports-key":
+            env.API_FOOTBALL_KEY,
+          "Accept":
+            "application/json"
+        }
+      },
+      7000
+    );
 
-    id:
-      String(m.id),
-
-    date:
-      m.utcDate,
-
-    status:
-      m.status,
-
-    minute:
-      m.minute ?? null,
-
-    league:
-      FD_LEAGUES[
-        m.competition?.code
-      ] ||
-      m.competition?.name ||
-      "",
-
-    leagueCode:
-      m.competition?.code ||
-      "",
-
-    matchday:
-      m.matchday ?? null,
-
-    stage:
-      m.stage ?? null,
-
-    homeTeam: {
-
-      id:
-        m.homeTeam?.id,
-
-      name:
-        m.homeTeam?.name ||
-        "",
-
-      shortName:
-        m.homeTeam?.shortName ||
-        m.homeTeam?.name ||
-        "",
-
-      crest:
-        m.homeTeam?.crest ||
-        ""
-
-    },
-
-    awayTeam: {
-
-      id:
-        m.awayTeam?.id,
-
-      name:
-        m.awayTeam?.name ||
-        "",
-
-      shortName:
-        m.awayTeam?.shortName ||
-        m.awayTeam?.name ||
-        "",
-
-      crest:
-        m.awayTeam?.crest ||
-        ""
-
-    },
-
-    score:
-      m.score || {}
-
-  };
-
-}
-
-
-/* =====================================================
-   FIXTURES
-===================================================== */
-
-async function fixtures(
-  env
-) {
-
-  const now =
-    new Date();
-
-
-  const end =
-    new Date(now);
-
-
-  end.setUTCDate(
-    end.getUTCDate() + 7
-  );
-
-
-  const q =
-    new URLSearchParams({
-
-      competitions:
-        Object.keys(
-          FD_LEAGUES
-        ).join(","),
-
-      dateFrom:
-        now.toISOString()
-          .slice(0, 10),
-
-      dateTo:
-        end.toISOString()
-          .slice(0, 10)
-
-    });
-
+  if (!response.ok) {
+    throw new Error(
+      `API-Football HTTP ${response.status}`
+    );
+  }
 
   const data =
-    await fdFetch(
-      `/matches?${q}`,
-      env,
-      300
-    );
-
+    await response.json();
 
   const events =
-    (data.matches || [])
+    (data.response || []).map(item => ({
+      date:
+        item.fixture?.date,
 
-      .map(fdNorm)
+      league:
+        item.league?.name ||
+        "Football",
 
-      .filter(
-        x =>
-          new Date(x.date) >= now
-      )
+      leagueId:
+        item.league?.id,
 
-      .sort(
-        (a, b) =>
-          new Date(a.date) -
-          new Date(b.date)
-      )
+      homeTeam: {
+        name:
+          item.teams?.home?.name ||
+          "Home",
 
-      .slice(0, 60);
+        shortName:
+          item.teams?.home?.name ||
+          "Home",
 
+        crest:
+          item.teams?.home?.logo ||
+          ""
+      },
+
+      awayTeam: {
+        name:
+          item.teams?.away?.name ||
+          "Away",
+
+        shortName:
+          item.teams?.away?.name ||
+          "Away",
+
+        crest:
+          item.teams?.away?.logo ||
+          ""
+      },
+
+      score: {
+        home:
+          item.goals?.home,
+
+        away:
+          item.goals?.away
+      },
+
+      status:
+        item.fixture?.status?.short,
+
+      statusLong:
+        item.fixture?.status?.long
+    }));
+
+  const live =
+    events.filter(e =>
+      [
+        "1H",
+        "HT",
+        "2H",
+        "ET",
+        "P",
+        "LIVE"
+      ].includes(e.status)
+    );
+
+  const finished =
+    events.filter(e =>
+      [
+        "FT",
+        "AET",
+        "PEN"
+      ].includes(e.status)
+    );
+
+  const upcoming =
+    events.filter(e =>
+      !live.includes(e) &&
+      !finished.includes(e)
+    );
 
   return {
-
+    ok: true,
+    version: VERSION,
     events,
-
-    count:
-      events.length,
-
-    message:
-      events.length
-        ? null
-        : "No upcoming fixtures found.",
-
-    source:
-      "football-data.org",
-
+    live,
+    finished,
+    upcoming,
+    count: events.length,
+    liveCount: live.length,
     updated:
-      new Date().toISOString()
-
+      nowISO()
   };
-
 }
 
+/* -----------------------------------------------------
+   BBC News
+----------------------------------------------------- */
 
-/* =====================================================
-   BBC NEWS
-===================================================== */
-
-function dec(
-  text = ""
-) {
-
-  return text
-
-    .replace(
-      /<!\[CDATA\[([\s\S]*?)\]\]>/g,
-      "$1"
-    )
-
-    .replace(
-      /&amp;/g,
-      "&"
-    )
-
-    .replace(
-      /&quot;/g,
-      '"'
-    )
-
-    .replace(
-      /&#39;/g,
-      "'"
-    )
-
-    .replace(
-      /&apos;/g,
-      "'"
-    )
-
-    .replace(
-      /&lt;/g,
-      "<"
-    )
-
-    .replace(
-      /&gt;/g,
-      ">"
-    )
-
-    .replace(
-      /&#(\d+);/g,
-      (_, n) =>
-        String.fromCharCode(+n)
-    )
-
-    .replace(
-      /&#x([0-9a-f]+);/gi,
-      (_, n) =>
-        String.fromCharCode(
-          parseInt(n, 16)
-        )
-    );
-
-}
-
-
-function xv(
-  x,
-  tag
-) {
-
-  const m =
-    x.match(
-      new RegExp(
-        `<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`,
-        "i"
+function xmlText(value) {
+  return stripTags(
+    value
+      .replace(
+        /<!\[CDATA\[([\s\S]*?)\]\]>/g,
+        "$1"
       )
-    );
-
-
-  return m
-    ? dec(m[1].trim())
-    : "";
-
+  );
 }
 
-
-function parseNews(x) {
-
-  const out = [];
-
+function parseBBCNews(xml) {
+  const articles = [];
 
   const items =
-    x.match(
-      /<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi
+    xml.match(
+      /<item\b[\s\S]*?<\/item>/gi
     ) || [];
 
-
-  for (
-    const item of items
-  ) {
-
+  for (const item of items) {
     const title =
-      xv(item, "title");
-
+      item.match(
+        /<title[^>]*>([\s\S]*?)<\/title>/i
+      )?.[1];
 
     const link =
-      xv(item, "link");
+      item.match(
+        /<link[^>]*>([\s\S]*?)<\/link>/i
+      )?.[1];
 
+    const description =
+      item.match(
+        /<description[^>]*>([\s\S]*?)<\/description>/i
+      )?.[1];
+
+    const published =
+      item.match(
+        /<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i
+      )?.[1];
 
     if (!title || !link) {
       continue;
     }
 
+    articles.push({
+      title:
+        xmlText(title),
 
-    const mc =
-      item.match(
-        /<media:content[^>]+url=["']([^"']+)["']/i
-      );
+      link:
+        xmlText(link),
 
+      description:
+        description
+          ? xmlText(description)
+          : "",
 
-    const mt =
-      item.match(
-        /<media:thumbnail[^>]+url=["']([^"']+)["']/i
-      );
-
-
-    const en =
-      item.match(
-        /<enclosure[^>]+url=["']([^"']+)["']/i
-      );
-
-
-    out.push({
-
-      title,
-
-      link,
+      published:
+        published
+          ? xmlText(published)
+          : null,
 
       source:
         "BBC Sport",
 
-      published:
-        xv(item, "pubDate") ||
-        xv(item, "dc:date"),
-
-      description:
-        xv(item, "description")
-          .replace(
-            /<[^>]+>/g,
-            ""
-          )
-          .trim()
-          .slice(0, 240),
-
-      image:
-        mc?.[1] ||
-        mt?.[1] ||
-        en?.[1] ||
-        ""
-
+      image: ""
     });
-
   }
 
-
-  return out;
-
+  return articles;
 }
-
 
 async function news() {
-
-  const r =
-    await fetch(
-      BBC,
+  const response =
+    await fetchWithTimeout(
+      BBC_RSS,
       {
         headers: {
-
           "User-Agent":
-            "YepFootball/1.0 (+https://yepfootball.com)",
-
-          Accept:
-            "application/rss+xml, application/xml, text/xml"
-
-        },
-
-        cf: {
-
-          cacheTtl:
-            900,
-
-          cacheEverything:
-            true
-
+            "YepFootball/1.0",
+          "Accept":
+            "application/rss+xml, application/xml"
         }
-
-      }
+      },
+      7000
     );
 
-
-  if (!r.ok) {
-
+  if (!response.ok) {
     throw new Error(
-      `BBC RSS ${r.status}`
+      `BBC HTTP ${response.status}`
     );
-
   }
 
+  const xml =
+    await response.text();
 
   const articles =
-    parseNews(
-      await r.text()
-    ).slice(0, 12);
-
+    parseBBCNews(xml);
 
   return {
-
-    articles,
-
+    ok: true,
+    articles:
+      articles.slice(0, 20),
     count:
       articles.length,
-
-    source: {
-
-      name:
-        "BBC Sport",
-
-      url:
-        "https://www.bbc.com/sport/football"
-
-    },
-
     updated:
-      new Date().toISOString()
-
+      nowISO()
   };
-
 }
 
+/* -----------------------------------------------------
+   Health
+----------------------------------------------------- */
 
-/* =====================================================
-   HEALTH
-===================================================== */
-
-async function health(
-  env
-) {
-
-  const started =
-    Date.now();
-
-
-  const result = {
-
+async function health(env) {
+  return json({
     ok: true,
 
-    upstreams: {},
-
-    elapsedMs: 0,
+    version:
+      VERSION,
 
     checked:
-      new Date().toISOString()
+      nowISO(),
 
-  };
+    upstreams: {
+      apiFootball:
+        env.API_FOOTBALL_KEY
+          ? "configured"
+          : "missing",
 
+      footballData:
+        env.FOOTBALL_DATA_TOKEN
+          ? "configured"
+          : "missing",
 
-  result.upstreams.apiFootball =
-    env.API_FOOTBALL_KEY
-      ? "configured"
-      : "Missing secret";
+      latestScores:
+        env.LATEST_SCORES
+          ? "ok"
+          : "missing"
+    },
 
+    dailyScoresSource:
+      "Soccerbase + football-data.org",
 
-  result.upstreams.footballData =
-    env.FOOTBALL_DATA_TOKEN
-      ? "configured"
-      : "Missing secret";
-
-
-  if (
-    !env.API_FOOTBALL_KEY ||
-    !env.FOOTBALL_DATA_TOKEN
-  ) {
-
-    result.ok =
-      false;
-
-  }
-
-
-  if (!env.LATEST_SCORES) {
-
-    result.ok =
-      false;
-
-    result.upstreams.latestScores =
-      "Missing KV binding LATEST_SCORES";
-
-  } else {
-
-    const snapshot =
-      await env.LATEST_SCORES.get(
-        "latest",
-        "json"
-      );
-
-
-    result.upstreams.latestScores =
-      snapshot
-
-        ? `ok (${snapshot.date || "unknown date"}, ${snapshot.count ?? 0} results)`
-
-        : "configured but empty";
-
-  }
-
-
-  result.elapsedMs =
-    Date.now() - started;
-
-
-  return result;
-
+    apiFootballUsedForLatestScores:
+      false
+  });
 }
 
+/* -----------------------------------------------------
+   API router
+----------------------------------------------------- */
 
-/* =====================================================
-   REQUEST HANDLER
-===================================================== */
-
-async function handle(
-  req,
+async function handleAPI(
+  request,
   env
 ) {
-
   const url =
-    new URL(req.url);
+    new URL(request.url);
 
   const path =
     url.pathname;
 
-
-  try {
-
-
-    if (
-      path === "/api/health"
-    ) {
-
-      const result =
-        await health(env);
-
-
-      return json(
-        result,
-        result.ok
-          ? 200
-          : 502,
-        30
-      );
-
-    }
-
-
-    if (
-      path === "/api/scores"
-    ) {
-
-      /*
-        Manual refresh:
-
-        https://yepfootball.com/api/scores?refresh=1
-      */
-
-      if (
-        url.searchParams.get(
-          "refresh"
-        ) === "1"
-      ) {
-
-        const published =
-          await publishYesterday(
-            env,
-            true
-          );
-
-
-        const current =
-          await latest(env);
-
-
-        return json(
-          {
-            ...current,
-
-            refresh:
-              published
-
-          },
-          200,
-          0
-        );
-
-      }
-
-
-      return json(
-        await latest(env),
-        200,
-        30
-      );
-
-    }
-
-
-    if (
-      path === "/api/match-centre"
-    ) {
-
-      return json(
-        await matchCentre(env),
-        200,
-        60
-      );
-
-    }
-
-
-    if (
-      path === "/api/fixtures"
-    ) {
-
-      return json(
-        await fixtures(env),
-        200,
-        300
-      );
-
-    }
-
-
-    if (
-      path === "/api/news"
-    ) {
-
-      return json(
-        await news(),
-        200,
-        900
-      );
-
-    }
-
-
-  } catch (error) {
-
-    return json(
-
-      {
-
-        error:
-          "Football data feed unavailable",
-
-        detail:
-          error.message ||
-          String(error),
-
-        checked:
-          new Date().toISOString()
-
-      },
-
-      502,
-
-      30
-
-    );
-
+  if (path === "/api/health") {
+    return health(env);
   }
 
+  if (path === "/api/scores") {
+    try {
+      return await scores(
+        env,
+        request
+      );
+    } catch (error) {
+      return json({
+        ok: false,
+        events: [],
+        count: 0,
+        message:
+          error?.message ||
+          "Scores unavailable",
+        version:
+          VERSION
+      }, 502);
+    }
+  }
 
-  return null;
+  if (path === "/api/fixtures") {
+    return fixtures(env);
+  }
 
+  if (path === "/api/news") {
+    try {
+      return json(
+        await news()
+      );
+    } catch (error) {
+      return json({
+        ok: false,
+        articles: [],
+        count: 0,
+        message:
+          error?.message ||
+          "News unavailable"
+      }, 502);
+    }
+  }
+
+  /*
+     Match Centre aliases.
+  */
+  if (
+    path === "/api/matches" ||
+    path === "/api/live"
+  ) {
+    try {
+      return json(
+        await apiFootballMatches(env)
+      );
+    } catch (error) {
+      return json({
+        ok: false,
+        events: [],
+        live: [],
+        finished: [],
+        upcoming: [],
+        message:
+          error?.message ||
+          "Match Centre unavailable"
+      }, 502);
+    }
+  }
+
+  return json({
+    ok: false,
+    error:
+      "API endpoint not found",
+    path
+  }, 404);
 }
 
-
-/* =====================================================
-   CLOUDFLARE WORKER
-===================================================== */
+/* -----------------------------------------------------
+   Worker
+----------------------------------------------------- */
 
 export default {
 
   async fetch(
-    req,
+    request,
     env,
     ctx
   ) {
+    const url =
+      new URL(request.url);
 
-    const response =
-      await handle(
-        req,
+    /*
+       API routes ALWAYS go through Worker.
+    */
+    if (
+      url.pathname.startsWith("/api/")
+    ) {
+      return handleAPI(
+        request,
         env
       );
+    }
 
-
-    return (
-      response ||
-      env.ASSETS.fetch(req)
+    /*
+       Everything else is the website.
+    */
+    return env.ASSETS.fetch(
+      request
     );
-
   },
 
-
+  /*
+     Cron runs every 15 minutes.
+     It refreshes yesterday's snapshot,
+     but does NOT erase a good snapshot
+     when sources fail.
+  */
   async scheduled(
-    event,
+    controller,
     env,
     ctx
   ) {
+    try {
+      const result =
+        await publishYesterday(
+          env,
+          false
+        );
 
-    ctx.waitUntil(
+      console.log(
+        "YepFootball scheduled update:",
+        JSON.stringify(result)
+      );
 
-      publishYesterday(
-        env
-      ).catch(
-        error => {
-
-          console.error(
-            "Daily scores snapshot not published:",
-            error
-          );
-
-        }
-      )
-
-    );
-
+    } catch (error) {
+      console.error(
+        "YepFootball scheduled update failed:",
+        error
+      );
+    }
   }
-
 };
