@@ -379,21 +379,16 @@ async function footballDataFetch(url, env) {
       FL1
 ========================================================= */
 
+
 async function fixtures(env) {
 
   const from = todayUTC();
 
-  /*
-     30 days gives the site enough future matches while
-     avoiding unnecessarily large API requests.
-  */
-
-  const to = addDays(from, 30);
-
+  // YepFootball displays the next 7 days
+  const to = addDays(from, 7);
 
   const competitions =
     Object.keys(COMPETITIONS).join(",");
-
 
   const url =
     `${FOOTBALL_DATA_BASE}/matches` +
@@ -401,25 +396,15 @@ async function fixtures(env) {
     `&dateFrom=${from}` +
     `&dateTo=${to}`;
 
-
   try {
 
     const data =
       await footballDataFetch(url, env);
 
-
     const matches =
       Array.isArray(data.matches)
         ? data.matches
         : [];
-
-
-    /*
-       Only upcoming games.
-
-       football-data.org can use SCHEDULED or TIMED
-       for matches that have not started.
-    */
 
     const upcoming =
       matches
@@ -437,17 +422,13 @@ async function fixtures(env) {
         })
         .filter(match => {
 
-          /*
-             Additional protection:
-             only future matches from the current moment.
-          */
-
           const matchDate =
             new Date(match.utcDate);
 
           return (
             !Number.isNaN(matchDate.getTime()) &&
-            matchDate.getTime() >= Date.now() - 60 * 1000
+            matchDate.getTime() >=
+              Date.now() - 60 * 1000
           );
 
         })
@@ -455,7 +436,6 @@ async function fixtures(env) {
 
           const competitionCode =
             match.competition?.code || "";
-
 
           return {
 
@@ -515,12 +495,10 @@ async function fixtures(env) {
             },
 
             venue:
-              match.venue ||
-              "",
+              match.venue || "",
 
             matchday:
-              match.matchday ??
-              null
+              match.matchday ?? null
 
           };
 
@@ -530,7 +508,6 @@ async function fixtures(env) {
             new Date(a.date) -
             new Date(b.date)
         );
-
 
     return {
 
@@ -542,11 +519,6 @@ async function fixtures(env) {
 
       fixtures: upcoming,
 
-      /*
-         "events" is included for compatibility with
-         older YepFootball frontend code.
-      */
-
       events: upcoming,
 
       count: upcoming.length,
@@ -555,7 +527,6 @@ async function fixtures(env) {
         new Date().toISOString()
 
     };
-
 
   } catch (error) {
 
@@ -583,7 +554,6 @@ async function fixtures(env) {
 
   }
 }
-
 
 /* =========================================================
    XML HELPERS FOR BBC
