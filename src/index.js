@@ -379,181 +379,226 @@ async function footballDataFetch(url, env) {
       FL1
 ========================================================= */
 
-
 async function fixtures(env) {
 
   const from = todayUTC();
-
-  // YepFootball displays the next 7 days
   const to = addDays(from, 7);
 
-  const competitions =
-    Object.keys(COMPETITIONS).join(",");
+  const competitionCodes = [
+    "PL",
+    "CL",
+    "PD",
+    "SA",
+    "BL1",
+    "FL1"
+  ];
 
-  const url =
-    `${FOOTBALL_DATA_BASE}/matches` +
-    `?competitions=${encodeURIComponent(competitions)}` +
-    `&dateFrom=${from}` +
-    `&dateTo=${to}`;
+  const allFixtures = [];
+  const diagnostics = [];
 
-  try {
+  for (const code of competitionCodes) {
 
-    const data =
-      await footballDataFetch(url, env);
+    try {
 
-    const matches =
-      Array.isArray(data.matches)
-        ? data.matches
-        : [];
+      const url =
+        `${FOOTBALL_DATA_BASE}/competitions/${code}/matches` +
+        `?dateFrom=${from}` +
+        `&dateTo=${to}`;
 
-    const upcoming =
-      matches
-        .filter(match => {
+      const data =
+        await footballDataFetch(url, env);
 
-          const status =
-            String(match.status || "")
-              .toUpperCase();
+      const matches =
+        Array.isArray(data.matches)
+          ? data.matches
+          : [];
 
-          return (
-            status === "SCHEDULED" ||
-            status === "TIMED"
-          );
+      diagnostics.push({
+        competition: code,
+        returned: matches.length
+      });
 
-        })
-        .filter(match => {
+      for (const match of matches) {
 
-          const matchDate =
-            new Date(match.utcDate);
+        const matchDate =
+          new Date(match.utcDate);
 
-          return (
-            !Number.isNaN(matchDate.getTime()) &&
-            matchDate.getTime() >=
-              Date.now() - 60 * 1000
-          );
+        if (
+          Number.isNaN(matchDate.getTime())
+        ) {
+          continue;
+        }
 
-        })
-        .map(match => {
+        /*
+          We deliberately do NOT filter on
+          SCHEDULED / TIMED here.
 
-          const competitionCode =
-            match.competition?.code || "";
+          Future matches can have different
+          status values depending on the
+          upstream data.
+        */
 
-          return {
+        if (
+          matchDate.getTime() <
+          Date.now() - 60 * 1000
+        ) {
+          continue;
+        }
 
-            id: match.id,
+        allFixtures.push({
 
-            date: match.utcDate,
+          id:
+            match.id,
 
-            status: match.status,
+          date:
+            match.utcDate,
 
-            league:
-              COMPETITIONS[competitionCode] ||
-              match.competition?.name ||
-              "Football",
+          status:
+            match.status || "",
 
-            leagueCode:
-              competitionCode,
+          league:
+            COMPETITIONS[code] ||
+            match.competition?.name ||
+            code,
 
-            leagueId:
-              match.competition?.id ?? null,
+          leagueCode:
+            code,
 
-            homeTeam: {
-              id:
-                match.homeTeam?.id ?? null,
+          leagueId:
+            match.competition?.id ??
+            null,
 
-              name:
-                match.homeTeam?.name ||
-                match.homeTeam?.shortName ||
-                "",
+          homeTeam: {
 
-              shortName:
-                match.homeTeam?.shortName ||
-                match.homeTeam?.name ||
-                "",
+            id:
+              match.homeTeam?.id ??
+              null,
 
-              crest:
-                match.homeTeam?.crest ||
-                ""
-            },
+            name:
+              match.homeTeam?.name ||
+              match.homeTeam?.shortName ||
+              "",
 
-            awayTeam: {
-              id:
-                match.awayTeam?.id ?? null,
+            shortName:
+              match.homeTeam?.shortName ||
+              match.homeTeam?.name ||
+              "",
 
-              name:
-                match.awayTeam?.name ||
-                match.awayTeam?.shortName ||
-                "",
+            crest:
+              match.homeTeam?.crest ||
+              ""
 
-              shortName:
-                match.awayTeam?.shortName ||
-                match.awayTeam?.name ||
-                "",
+          },
 
-              crest:
-                match.awayTeam?.crest ||
-                ""
-            },
+          awayTeam: {
 
-            venue:
-              match.venue || "",
+            id:
+              match.awayTeam?.id ??
+              null,
 
-            matchday:
-              match.matchday ?? null
+            name:
+              match.awayTeam?.name ||
+              match.awayTeam?.shortName ||
+              "",
 
-          };
+            shortName:
+              match.awayTeam?.shortName ||
+              match.awayTeam?.name ||
+              "",
 
-        })
-        .sort(
-          (a, b) =>
-            new Date(a.date) -
-            new Date(b.date)
-        );
+            crest:
+              match.awayTeam?.crest ||
+              ""
 
-    return {
+          },
 
-      ok: true,
+          venue:
+            match.venue ||
+            "",
 
-      from,
+          matchday:
+            match.matchday ??
+            null
 
-      to,
+        });
 
-      fixtures: upcoming,
+      }
 
-      events: upcoming,
+    } catch (error) {
 
-      count: upcoming.length,
+      diagnostics.push({
 
-      updated:
-        new Date().toISOString()
+        competition: code,
 
-    };
+        returned: 0,
 
-  } catch (error) {
+        error:
+          String(
+            error?.message ||
+            error
+          )
 
-    return {
+      });
 
-      ok: false,
-
-      from,
-
-      to,
-
-      fixtures: [],
-
-      events: [],
-
-      count: 0,
-
-      message:
-        String(error?.message || error),
-
-      updated:
-        new Date().toISOString()
-
-    };
+    }
 
   }
+
+
+  /*
+    Remove duplicates.
+  */
+
+  const unique =
+    Array.from(
+      new Map(
+        allFixtures.map(
+          fixture => [
+            fixture.id,
+            fixture
+          ]
+        )
+      ).values()
+    );
+
+
+  /*
+    Sort chronologically.
+  */
+
+  unique.sort(
+    (a, b) =>
+      new Date(a.date) -
+      new Date(b.date)
+  );
+
+
+  return {
+
+    ok: true,
+
+    from,
+
+    to,
+
+    fixtures:
+      unique,
+
+    events:
+      unique,
+
+    count:
+      unique.length,
+
+    diagnostics,
+
+    updated:
+      new Date().toISOString()
+
+  };
+
 }
+
 
 /* =========================================================
    XML HELPERS FOR BBC
