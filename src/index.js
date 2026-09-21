@@ -384,108 +384,164 @@ async function fixtures(env) {
   const from = todayUTC();
   const to = addDays(from, 7);
 
-  const competitionCodes = [
-    "PL",
-    "CL",
-    "PD",
-    "SA",
-    "BL1",
-    "FL1"
+  const leagues = [
+    {
+      code: "PL",
+      name: "Premier League",
+      id: 39
+    },
+    {
+      code: "CL",
+      name: "Champions League",
+      id: 2
+    },
+    {
+      code: "PD",
+      name: "La Liga",
+      id: 140
+    },
+    {
+      code: "SA",
+      name: "Serie A",
+      id: 135
+    },
+    {
+      code: "BL1",
+      name: "Bundesliga",
+      id: 78
+    },
+    {
+      code: "FL1",
+      name: "Ligue 1",
+      id: 61
+    }
   ];
 
-  const allFixtures = [];
+  if (!env.API_FOOTBALL_KEY) {
+    return {
+      ok: false,
+      from,
+      to,
+      fixtures: [],
+      events: [],
+      count: 0,
+      message: "Missing Cloudflare secret API_FOOTBALL_KEY",
+      updated: new Date().toISOString()
+    };
+  }
+
   const diagnostics = [];
 
-  for (const code of competitionCodes) {
+  const requests = leagues.map(async (league) => {
+
+    const url =
+      `${API_FOOTBALL_BASE}/fixtures` +
+      `?league=${league.id}` +
+      `&season=2026` +
+      `&from=${from}` +
+      `&to=${to}`;
 
     try {
 
-      const url =
-        `${FOOTBALL_DATA_BASE}/competitions/${code}/matches` +
-        `?dateFrom=${from}` +
-        `&dateTo=${to}`;
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "x-apisports-key":
+            env.API_FOOTBALL_KEY,
 
-      const data =
-        await footballDataFetch(url, env);
+          "Accept":
+            "application/json"
+        }
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+
+        diagnostics.push({
+          competition: league.code,
+          returned: 0,
+          httpStatus: response.status,
+          error:
+            data?.errors ||
+            `HTTP ${response.status}`
+        });
+
+        return [];
+      }
 
       const matches =
-        Array.isArray(data.matches)
-          ? data.matches
+        Array.isArray(data.response)
+          ? data.response
           : [];
 
       diagnostics.push({
-        competition: code,
-        returned: matches.length
+        competition: league.code,
+        returned: matches.length,
+        apiResults:
+          data.results ?? matches.length
       });
 
-      for (const match of matches) {
+      return matches.map(match => {
 
-        const matchDate =
-          new Date(match.utcDate);
+        const fixture =
+          match.fixture || {};
 
-        if (
-          Number.isNaN(matchDate.getTime())
-        ) {
-          continue;
-        }
+        const teams =
+          match.teams || {};
 
-        /*
-          We deliberately do NOT filter on
-          SCHEDULED / TIMED here.
+        const leagueData =
+          match.league || {};
 
-          Future matches can have different
-          status values depending on the
-          upstream data.
-        */
+        const goals =
+          match.goals || {};
 
-        if (
-          matchDate.getTime() <
-          Date.now() - 60 * 1000
-        ) {
-          continue;
-        }
-
-        allFixtures.push({
+        return {
 
           id:
-            match.id,
+            fixture.id ?? null,
 
           date:
-            match.utcDate,
+            fixture.date || "",
 
           status:
-            match.status || "",
+            fixture.status?.short ||
+            fixture.status?.long ||
+            "",
+
+          statusLong:
+            fixture.status?.long ||
+            "",
+
+          minute:
+            fixture.status?.elapsed ??
+            null,
 
           league:
-            COMPETITIONS[code] ||
-            match.competition?.name ||
-            code,
+            league.name,
 
           leagueCode:
-            code,
+            league.code,
 
           leagueId:
-            match.competition?.id ??
-            null,
+            league.id,
 
           homeTeam: {
 
             id:
-              match.homeTeam?.id ??
+              teams.home?.id ??
               null,
 
             name:
-              match.homeTeam?.name ||
-              match.homeTeam?.shortName ||
+              teams.home?.name ||
               "",
 
             shortName:
-              match.homeTeam?.shortName ||
-              match.homeTeam?.name ||
+              teams.home?.name ||
               "",
 
             crest:
-              match.homeTeam?.crest ||
+              teams.home?.logo ||
               ""
 
           },
@@ -493,44 +549,60 @@ async function fixtures(env) {
           awayTeam: {
 
             id:
-              match.awayTeam?.id ??
+              teams.away?.id ??
               null,
 
             name:
-              match.awayTeam?.name ||
-              match.awayTeam?.shortName ||
+              teams.away?.name ||
               "",
 
             shortName:
-              match.awayTeam?.shortName ||
-              match.awayTeam?.name ||
+              teams.away?.name ||
               "",
 
             crest:
-              match.awayTeam?.crest ||
+              teams.away?.logo ||
               ""
 
           },
 
+          homeScore:
+            goals.home ??
+            null,
+
+          awayScore:
+            goals.away ??
+            null,
+
           venue:
-            match.venue ||
+            fixture.venue?.name ||
             "",
 
-          matchday:
-            match.matchday ??
+          city:
+            fixture.venue?.city ||
+            "",
+
+          referee:
+            fixture.referee ||
+            "",
+
+          timestamp:
+            fixture.timestamp ??
             null
 
-        });
+        };
 
-      }
+      });
 
     } catch (error) {
 
       diagnostics.push({
 
-        competition: code,
+        competition:
+          league.code,
 
-        returned: 0,
+        returned:
+          0,
 
         error:
           String(
@@ -540,19 +612,59 @@ async function fixtures(env) {
 
       });
 
+      return [];
     }
 
-  }
+  });
+
+
+  const results =
+    await Promise.all(requests);
+
+
+  const allFixtures =
+    results.flat();
 
 
   /*
-    Remove duplicates.
+     Keep only future fixtures.
+     We don't want completed matches
+     appearing in the Fixtures page.
+  */
+
+  const upcoming =
+    allFixtures
+      .filter(fixture => {
+
+        if (!fixture.date) {
+          return false;
+        }
+
+        const date =
+          new Date(fixture.date);
+
+        return (
+          !Number.isNaN(date.getTime()) &&
+          date.getTime() >=
+            Date.now() - 60 * 1000
+        );
+
+      })
+      .sort(
+        (a, b) =>
+          new Date(a.date) -
+          new Date(b.date)
+      );
+
+
+  /*
+     Remove duplicates.
   */
 
   const unique =
     Array.from(
       new Map(
-        allFixtures.map(
+        upcoming.map(
           fixture => [
             fixture.id,
             fixture
@@ -562,20 +674,12 @@ async function fixtures(env) {
     );
 
 
-  /*
-    Sort chronologically.
-  */
-
-  unique.sort(
-    (a, b) =>
-      new Date(a.date) -
-      new Date(b.date)
-  );
-
-
   return {
 
     ok: true,
+
+    source:
+      "API-Football",
 
     from,
 
@@ -598,8 +702,6 @@ async function fixtures(env) {
   };
 
 }
-
-
 /* =========================================================
    XML HELPERS FOR BBC
 ========================================================= */
