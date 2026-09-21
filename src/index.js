@@ -1,26 +1,33 @@
 /* =====================================================
    YepFootball Worker
-   Version: 2026-09-20.3
+   Version: 2026-09-21.1
 
-   Daily Scores:
-   - Soccerbase web results
-   - No API-Football requests for Latest Scores
-   - Previous snapshot is preserved if source fails
+   SCORES
+   - Soccerbase
+   - football-data.org supplement
+   - No API-Football for daily scores
 
-   Other sections:
-   - Match Centre: API-Football
-   - Fixtures: football-data.org
-   - News: BBC Sport RSS
+   MATCH CENTRE
+   - API-Football
 
-   FIXES:
-   - Correct Soccerbase score extraction
-   - Date is never treated as a score
-   - Only selected competitions are included
-   - Each match uses the score link to identify
-     the home and away teams
+   FIXTURES
+   - Single football-data.org request
+   - 7 days ahead
+
+   NEWS
+   - BBC Sport RSS
+   - BBC Sport football page fallback
+
+   FIXES
+   - Soccerbase date cannot become a score
+   - Correct competition boundaries
+   - Fixtures uses one API request
+   - BBC RSS has fallback
+   - Health reports fixture/news status
 ===================================================== */
 
-const VERSION = "2026-09-20.3";
+const VERSION = "2026-09-21.1";
+
 const TZ = "Europe/Paris";
 
 const SCORE_KEY = "latest_scores";
@@ -38,19 +45,28 @@ const API_FOOTBALL_URL =
 const BBC_RSS_URL =
   "https://feeds.bbci.co.uk/sport/football/rss.xml";
 
+const BBC_FOOTBALL_URL =
+  "https://www.bbc.com/sport/football";
+
 
 /* =====================================================
    GENERAL HELPERS
 ===================================================== */
 
 function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store"
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+      headers: {
+        "Content-Type":
+          "application/json; charset=utf-8",
+
+        "Cache-Control":
+          "no-store"
+      }
     }
-  });
+  );
 }
 
 
@@ -90,7 +106,9 @@ function decodeHtml(value) {
     })
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => {
       try {
-        return String.fromCharCode(parseInt(n, 16));
+        return String.fromCharCode(
+          parseInt(n, 16)
+        );
       } catch {
         return "";
       }
@@ -99,16 +117,24 @@ function decodeHtml(value) {
 
 
 function normalize(value) {
-  return cleanText(decodeHtml(value))
+  return cleanText(
+    decodeHtml(value)
+  )
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(
+      /[^\p{L}\p{N}]+/gu,
+      " "
+    )
     .trim();
 }
 
 
 function teamKey(value) {
   return normalize(value)
-    .replace(/\b(fc|cf|sc|afc)\b/g, "")
+    .replace(
+      /\b(fc|cf|sc|afc)\b/g,
+      ""
+    )
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -119,6 +145,7 @@ async function fetchWithTimeout(
   options = {},
   timeoutMs = 8000
 ) {
+
   const controller =
     new AbortController();
 
@@ -129,11 +156,18 @@ async function fetchWithTimeout(
     );
 
   try {
-    return await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
+
+    return await fetch(
+      url,
+      {
+        ...options,
+        signal:
+          controller.signal
+      }
+    );
+
   } finally {
+
     clearTimeout(timer);
   }
 }
@@ -161,9 +195,16 @@ function getYesterdayString() {
 
   const values = {};
 
-  for (const item of local) {
+  for (
+    const item
+    of local
+  ) {
 
-    if (item.type !== "literal") {
+    if (
+      item.type !==
+      "literal"
+    ) {
+
       values[item.type] =
         item.value;
     }
@@ -194,45 +235,60 @@ const SOCCERBASE_COMPETITIONS = [
     names: [
       "premier league"
     ],
-    league: "Premier League",
-    leagueId: 39,
-    leagueCode: "PL"
+    league:
+      "Premier League",
+    leagueId:
+      39,
+    leagueCode:
+      "PL"
   },
 
   {
     names: [
       "italian serie a"
     ],
-    league: "Serie A",
-    leagueId: 135,
-    leagueCode: "SA"
+    league:
+      "Serie A",
+    leagueId:
+      135,
+    leagueCode:
+      "SA"
   },
 
   {
     names: [
       "german bundesliga"
     ],
-    league: "Bundesliga",
-    leagueId: 78,
-    leagueCode: "BL1"
+    league:
+      "Bundesliga",
+    leagueId:
+      78,
+    leagueCode:
+      "BL1"
   },
 
   {
     names: [
       "spanish la liga"
     ],
-    league: "La Liga",
-    leagueId: 140,
-    leagueCode: "PD"
+    league:
+      "La Liga",
+    leagueId:
+      140,
+    leagueCode:
+      "PD"
   },
 
   {
     names: [
       "french ligue 1"
     ],
-    league: "Ligue 1",
-    leagueId: 61,
-    leagueCode: "FL1"
+    league:
+      "Ligue 1",
+    leagueId:
+      61,
+    leagueCode:
+      "FL1"
   },
 
   {
@@ -240,9 +296,12 @@ const SOCCERBASE_COMPETITIONS = [
       "uefa champions league",
       "champions league"
     ],
-    league: "Champions League",
-    leagueId: 2,
-    leagueCode: "CL"
+    league:
+      "Champions League",
+    leagueId:
+      2,
+    leagueCode:
+      "CL"
   },
 
   {
@@ -250,9 +309,12 @@ const SOCCERBASE_COMPETITIONS = [
       "uefa europa league",
       "europa league"
     ],
-    league: "Europa League",
-    leagueId: 3,
-    leagueCode: "EL"
+    league:
+      "Europa League",
+    leagueId:
+      3,
+    leagueCode:
+      "EL"
   },
 
   {
@@ -261,17 +323,24 @@ const SOCCERBASE_COMPETITIONS = [
       "europa conference league",
       "conference league"
     ],
-    league: "Conference League",
-    leagueId: 848,
-    leagueCode: "ECL"
+    league:
+      "Conference League",
+    leagueId:
+      848,
+    leagueCode:
+      "ECL"
   }
 ];
 
 
-function findCompetition(heading) {
+function findCompetition(
+  heading
+) {
 
   const normalizedHeading =
-    normalize(heading);
+    normalize(
+      heading
+    );
 
   return SOCCERBASE_COMPETITIONS.find(
     competition =>
@@ -285,32 +354,25 @@ function findCompetition(heading) {
 
 
 /* =====================================================
-   SOCCERBASE HTML HELPERS
+   SOCCERBASE HELPERS
 ===================================================== */
 
 function stripTags(value) {
 
   return decodeHtml(
     String(value || "")
-      .replace(/<[^>]+>/g, " ")
+      .replace(
+        /<[^>]+>/g,
+        " "
+      )
   )
-    .replace(/\s+/g, " ")
+    .replace(
+      /\s+/g,
+      " "
+    )
     .trim();
 }
 
-
-/*
-  Extract every <a> element in a match row.
-
-  We keep both the text and the position.
-
-  Example Soccerbase row:
-
-    Date
-    Home Team
-    3 - 0
-    Away Team
-*/
 
 function extractAnchors(html) {
 
@@ -322,14 +384,14 @@ function extractAnchors(html) {
   let match;
 
   while (
-    (match = regex.exec(html)) !== null
+    (match =
+      regex.exec(html)) !== null
   ) {
 
-    const attributes =
-      match[1] || "";
-
     const text =
-      stripTags(match[2]);
+      stripTags(
+        match[2]
+      );
 
     if (!text) {
       continue;
@@ -337,8 +399,10 @@ function extractAnchors(html) {
 
     anchors.push({
       text,
-      normalized: normalize(text),
-      attributes
+      normalized:
+        normalize(text),
+      attributes:
+        match[1] || ""
     });
   }
 
@@ -346,25 +410,9 @@ function extractAnchors(html) {
 }
 
 
-/*
-  A Soccerbase score is a dedicated link
-  such as:
-
-      3 - 0
-      2 - 1
-      0 - 0
-
-  The important point is that we require the
-  WHOLE anchor text to be a score.
-
-  Therefore:
-
-      Sa 19Sep 2026
-
-  can never be interpreted as a score.
-*/
-
-function parseScoreText(value) {
+function parseScoreText(
+  value
+) {
 
   const text =
     cleanText(value);
@@ -379,14 +427,17 @@ function parseScoreText(value) {
   }
 
   return {
-    home: Number(match[1]),
-    away: Number(match[2])
+    home:
+      Number(match[1]),
+
+    away:
+      Number(match[2])
   };
 }
 
 
 /* =====================================================
-   SOCCERBASE PARSER
+   SOCCERBASE SCORE PARSER
 ===================================================== */
 
 function parseSoccerbase(
@@ -395,30 +446,6 @@ function parseSoccerbase(
 ) {
 
   const events = [];
-
-
-  /*
-    Find ALL h2 competition headings.
-
-    This is important because Soccerbase contains
-    many competitions that we do not want.
-
-    Example:
-
-      Premier League
-      Football League Championship
-      Football League One
-      Football League Two
-      National League
-      Scottish Premier
-      ...
-      Italian Serie A
-      German Bundesliga
-      Spanish La Liga
-      French Ligue 1
-
-    We use every heading as a section boundary.
-  */
 
   const headingRegex =
     /<h2\b[^>]*>([\s\S]*?)<\/h2>/gi;
@@ -438,6 +465,7 @@ function parseSoccerbase(
       );
 
     headings.push({
+
       position:
         headingMatch.index,
 
@@ -455,10 +483,6 @@ function parseSoccerbase(
   }
 
 
-  /*
-    Process each section separately.
-  */
-
   for (
     let i = 0;
     i < headings.length;
@@ -468,23 +492,16 @@ function parseSoccerbase(
     const section =
       headings[i];
 
-
-    /*
-      Ignore competitions that are not
-      part of YepFootball.
-    */
-
-    if (!section.competition) {
+    if (
+      !section.competition
+    ) {
       continue;
     }
 
 
-    /*
-      Find where this competition section ends.
-    */
-
     const nextPosition =
-      i + 1 < headings.length
+      i + 1 <
+      headings.length
         ? headings[i + 1].position
         : html.length;
 
@@ -496,10 +513,6 @@ function parseSoccerbase(
       );
 
 
-    /*
-      Find match rows.
-    */
-
     const rowRegex =
       /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
 
@@ -508,43 +521,33 @@ function parseSoccerbase(
 
     while (
       (rowMatch =
-        rowRegex.exec(sectionHtml)) !== null
+        rowRegex.exec(
+          sectionHtml
+        )) !== null
     ) {
 
       const rowHtml =
         rowMatch[1];
 
-
-      /*
-        Extract the actual links.
-
-        A normal Soccerbase match row contains:
-
-          date link
-          home team link
-          score link
-          away team link
-      */
-
       const anchors =
-        extractAnchors(rowHtml);
+        extractAnchors(
+          rowHtml
+        );
 
 
-      if (anchors.length < 3) {
+      if (
+        anchors.length < 3
+      ) {
         continue;
       }
 
 
-      /*
-        Find the dedicated score anchor.
+      let scoreIndex =
+        -1;
 
-        We do NOT search the complete row.
+      let score =
+        null;
 
-        This is the key fix.
-      */
-
-      let scoreIndex = -1;
-      let score = null;
 
       for (
         let a = 0;
@@ -561,15 +564,15 @@ function parseSoccerbase(
           continue;
         }
 
-        scoreIndex = a;
-        score = parsed;
+        scoreIndex =
+          a;
+
+        score =
+          parsed;
+
         break;
       }
 
-
-      /*
-        No genuine score anchor.
-      */
 
       if (
         scoreIndex < 0 ||
@@ -579,17 +582,10 @@ function parseSoccerbase(
       }
 
 
-      /*
-        The home team should be immediately
-        before the score link.
-
-        The away team should be immediately
-        after the score link.
-      */
-
       if (
         scoreIndex <= 0 ||
-        scoreIndex >= anchors.length - 1
+        scoreIndex >=
+          anchors.length - 1
       ) {
         continue;
       }
@@ -607,14 +603,13 @@ function parseSoccerbase(
         ].text;
 
 
-      if (!home || !away) {
+      if (
+        !home ||
+        !away
+      ) {
         continue;
       }
 
-
-      /*
-        Safety checks.
-      */
 
       const homeNormalized =
         normalize(home);
@@ -624,25 +619,28 @@ function parseSoccerbase(
 
 
       if (
-        homeNormalized.includes("football") ||
-        awayNormalized.includes("football")
+        homeNormalized.includes(
+          "football"
+        ) ||
+        awayNormalized.includes(
+          "football"
+        )
       ) {
         continue;
       }
 
 
       if (
-        homeNormalized.includes("results") ||
-        awayNormalized.includes("results")
+        homeNormalized.includes(
+          "results"
+        ) ||
+        awayNormalized.includes(
+          "results"
+        )
       ) {
         continue;
       }
 
-
-      /*
-        Make sure we did not accidentally
-        use a date link as a team.
-      */
 
       if (
         /\b20\d{2}\b/.test(home) ||
@@ -651,10 +649,6 @@ function parseSoccerbase(
         continue;
       }
 
-
-      /*
-        Create event.
-      */
 
       events.push({
 
@@ -686,31 +680,47 @@ function parseSoccerbase(
           section.competition.leagueId,
 
         homeTeam: {
-          id: null,
-          name: home,
-          shortName: home,
-          crest: ""
+
+          id:
+            null,
+
+          name:
+            home,
+
+          shortName:
+            home,
+
+          crest:
+            ""
         },
 
         awayTeam: {
-          id: null,
-          name: away,
-          shortName: away,
-          crest: ""
+
+          id:
+            null,
+
+          name:
+            away,
+
+          shortName:
+            away,
+
+          crest:
+            ""
         },
 
-        score
+        score:
+          score
       });
     }
   }
-
 
   return events;
 }
 
 
 /* =====================================================
-   GET SOCCERBASE RESULTS
+   SOCCERBASE REQUEST
 ===================================================== */
 
 async function getSoccerbaseResults(
@@ -718,7 +728,8 @@ async function getSoccerbaseResults(
 ) {
 
   const url =
-    `${SOCCERBASE_URL}?date=${encodeURIComponent(date)}`;
+    `${SOCCERBASE_URL}?date=` +
+    `${encodeURIComponent(date)}`;
 
   try {
 
@@ -727,6 +738,7 @@ async function getSoccerbaseResults(
         url,
         {
           headers: {
+
             "User-Agent":
               "YepFootball/1.0",
 
@@ -758,16 +770,27 @@ async function getSoccerbaseResults(
 
 
     return {
-      ok: true,
-      events
+
+      ok:
+        true,
+
+      events,
+
+      message:
+        null
     };
 
   } catch (error) {
 
     return {
-      ok: false,
+
+      ok:
+        false,
+
       events: [],
-      error: String(error)
+
+      message:
+        String(error)
     };
   }
 }
@@ -787,11 +810,15 @@ const FOOTBALL_DATA_COMPETITIONS = [
 ];
 
 
-function footballDataHeaders(env) {
+function footballDataHeaders(
+  env
+) {
 
   return {
+
     "X-Auth-Token":
-      env.FOOTBALL_DATA_TOKEN || "",
+      env.FOOTBALL_DATA_TOKEN ||
+      "",
 
     "Accept":
       "application/json"
@@ -804,61 +831,79 @@ function mapFootballDataMatch(
 ) {
 
   const competition =
-    match.competition || {};
+    match.competition ||
+    {};
 
   const code =
-    competition.code || "";
+    competition.code ||
+    "";
 
 
   const leagueMap = {
 
     PL: {
-      name: "Premier League",
-      id: 39
+      name:
+        "Premier League",
+      id:
+        39
     },
 
     PD: {
-      name: "La Liga",
-      id: 140
+      name:
+        "La Liga",
+      id:
+        140
     },
 
     SA: {
-      name: "Serie A",
-      id: 135
+      name:
+        "Serie A",
+      id:
+        135
     },
 
     BL1: {
-      name: "Bundesliga",
-      id: 78
+      name:
+        "Bundesliga",
+      id:
+        78
     },
 
     FL1: {
-      name: "Ligue 1",
-      id: 61
+      name:
+        "Ligue 1",
+      id:
+        61
     },
 
     CL: {
-      name: "Champions League",
-      id: 2
+      name:
+        "Champions League",
+      id:
+        2
     }
   };
 
 
   const league =
-    leagueMap[code] || {
+    leagueMap[code] ||
+    {
       name:
         competition.name ||
         "Football",
 
-      id: null
+      id:
+        null
     };
 
 
   const score =
-    match.score || {};
+    match.score ||
+    {};
 
   const fullTime =
-    score.fullTime || {};
+    score.fullTime ||
+    {};
 
 
   if (
@@ -870,10 +915,12 @@ function mapFootballDataMatch(
 
 
   const home =
-    match.homeTeam || {};
+    match.homeTeam ||
+    {};
 
   const away =
-    match.awayTeam || {};
+    match.awayTeam ||
+    {};
 
 
   return {
@@ -906,10 +953,12 @@ function mapFootballDataMatch(
     homeTeam: {
 
       id:
-        home.id ?? null,
+        home.id ??
+        null,
 
       name:
-        home.name || "Home",
+        home.name ||
+        "Home",
 
       shortName:
         home.shortName ||
@@ -918,16 +967,19 @@ function mapFootballDataMatch(
         "Home",
 
       crest:
-        home.crest || ""
+        home.crest ||
+        ""
     },
 
     awayTeam: {
 
       id:
-        away.id ?? null,
+        away.id ??
+        null,
 
       name:
-        away.name || "Away",
+        away.name ||
+        "Away",
 
       shortName:
         away.shortName ||
@@ -936,27 +988,38 @@ function mapFootballDataMatch(
         "Away",
 
       crest:
-        away.crest || ""
+        away.crest ||
+        ""
     },
 
     score: {
 
       home:
-        Number(fullTime.home),
+        Number(
+          fullTime.home
+        ),
 
       away:
-        Number(fullTime.away)
+        Number(
+          fullTime.away
+        )
     }
   };
 }
 
+
+/* =====================================================
+   FOOTBALL-DATA SCORES
+===================================================== */
 
 async function getFootballDataResults(
   env,
   date
 ) {
 
-  if (!env.FOOTBALL_DATA_TOKEN) {
+  if (
+    !env.FOOTBALL_DATA_TOKEN
+  ) {
     return [];
   }
 
@@ -983,7 +1046,9 @@ async function getFootballDataResults(
           url,
           {
             headers:
-              footballDataHeaders(env)
+              footballDataHeaders(
+                env
+              )
           },
           7000
         );
@@ -1004,8 +1069,10 @@ async function getFootballDataResults(
       ) {
 
         if (
-          match.status !== "FINISHED" &&
-          match.status !== "AWARDED"
+          match.status !==
+            "FINISHED" &&
+          match.status !==
+            "AWARDED"
         ) {
           continue;
         }
@@ -1018,13 +1085,16 @@ async function getFootballDataResults(
 
 
         if (event) {
-          results.push(event);
+          results.push(
+            event
+          );
         }
       }
 
     } catch {
       /*
-        Ignore individual competition failures.
+        Ignore one failed
+        competition.
       */
     }
   }
@@ -1059,7 +1129,10 @@ function dedupeEvents(
       `|${event.score?.away}`;
 
 
-    if (!map.has(key)) {
+    if (
+      !map.has(key)
+    ) {
+
       map.set(
         key,
         event
@@ -1111,9 +1184,14 @@ function sortEvents(
 
 
       if (
-        aOrder !== bOrder
+        aOrder !==
+        bOrder
       ) {
-        return aOrder - bOrder;
+
+        return (
+          aOrder -
+          bOrder
+        );
       }
 
 
@@ -1137,7 +1215,9 @@ async function readSnapshot(
   env
 ) {
 
-  if (!env.LATEST_SCORES) {
+  if (
+    !env.LATEST_SCORES
+  ) {
     return null;
   }
 
@@ -1151,7 +1231,8 @@ async function readSnapshot(
       );
 
 
-    return data || null;
+    return data ||
+      null;
 
   } catch {
 
@@ -1165,26 +1246,32 @@ async function writeSnapshot(
   snapshot
 ) {
 
-  if (!env.LATEST_SCORES) {
+  if (
+    !env.LATEST_SCORES
+  ) {
     return;
   }
 
 
   await env.LATEST_SCORES.put(
     SCORE_KEY,
-    JSON.stringify(snapshot)
+    JSON.stringify(
+      snapshot
+    )
   );
 
 
   await env.LATEST_SCORES.put(
     OLD_SCORE_KEY,
-    JSON.stringify(snapshot)
+    JSON.stringify(
+      snapshot
+    )
   );
 }
 
 
 /* =====================================================
-   PUBLISH YESTERDAY
+   PUBLISH SCORES
 ===================================================== */
 
 async function publishYesterday(
@@ -1202,11 +1289,6 @@ async function publishYesterday(
     );
 
 
-  /*
-    Use the existing snapshot unless
-    refresh=1 has been requested.
-  */
-
   if (
     existing &&
     existing.date === date &&
@@ -1217,10 +1299,6 @@ async function publishYesterday(
   }
 
 
-  /*
-    Soccerbase.
-  */
-
   const soccerbase =
     await getSoccerbaseResults(
       date
@@ -1228,13 +1306,9 @@ async function publishYesterday(
 
 
   let events =
-    soccerbase.events || [];
+    soccerbase.events ||
+    [];
 
-
-  /*
-    Football-data.org supplements
-    the results.
-  */
 
   const footballData =
     await getFootballDataResults(
@@ -1256,12 +1330,9 @@ async function publishYesterday(
     );
 
 
-  /*
-    If the source returned nothing,
-    preserve the existing snapshot.
-  */
-
-  if (!events.length) {
+  if (
+    !events.length
+  ) {
 
     if (existing) {
       return existing;
@@ -1272,7 +1343,8 @@ async function publishYesterday(
 
       events: [],
 
-      count: 0,
+      count:
+        0,
 
       date,
 
@@ -1319,26 +1391,757 @@ async function publishYesterday(
 
 
 /* =====================================================
+   FIXTURES
+   SINGLE football-data.org REQUEST
+===================================================== */
+
+async function getFixtures(
+  env
+) {
+
+  if (
+    !env.FOOTBALL_DATA_TOKEN
+  ) {
+
+    return {
+
+      events: [],
+
+      count:
+        0,
+
+      source:
+        "football-data.org",
+
+      message:
+        "Football-data token not configured."
+    };
+  }
+
+
+  /*
+    Today + 7 days.
+  */
+
+  const now =
+    new Date();
+
+
+  const future =
+    new Date(
+      now.getTime() +
+      7 *
+      24 *
+      60 *
+      60 *
+      1000
+    );
+
+
+  const dateFrom =
+    now
+      .toISOString()
+      .slice(0, 10);
+
+
+  const dateTo =
+    future
+      .toISOString()
+      .slice(0, 10);
+
+
+  /*
+    One request for all selected
+    competitions.
+
+    football-data.org documents
+    competitions=... together with
+    dateFrom/dateTo on /v4/matches.
+  */
+
+  const competitions =
+    [
+      "PL",
+      "PD",
+      "SA",
+      "BL1",
+      "FL1",
+      "CL"
+    ].join(",");
+
+
+  const url =
+    `${FOOTBALL_DATA_URL}` +
+    `/matches?dateFrom=${dateFrom}` +
+    `&dateTo=${dateTo}` +
+    `&competitions=${competitions}`;
+
+
+  try {
+
+    const response =
+      await fetchWithTimeout(
+        url,
+        {
+          headers:
+            footballDataHeaders(
+              env
+            )
+        },
+        9000
+      );
+
+
+    const responseText =
+      await response.text();
+
+
+    if (!response.ok) {
+
+      return {
+
+        events: [],
+
+        count:
+          0,
+
+        source:
+          "football-data.org",
+
+        message:
+          `football-data HTTP ${response.status}: ${responseText.slice(0, 300)}`
+      };
+    }
+
+
+    let data;
+
+    try {
+
+      data =
+        JSON.parse(
+          responseText
+        );
+
+    } catch {
+
+      return {
+
+        events: [],
+
+        count:
+          0,
+
+        source:
+          "football-data.org",
+
+        message:
+          "football-data returned invalid JSON."
+      };
+    }
+
+
+    const events =
+      (data.matches || [])
+        .filter(
+          match =>
+            [
+              "SCHEDULED",
+              "TIMED"
+            ].includes(
+              match.status
+            )
+        )
+        .map(
+          match => {
+
+            const competition =
+              match.competition ||
+              {};
+
+            const home =
+              match.homeTeam ||
+              {};
+
+            const away =
+              match.awayTeam ||
+              {};
+
+
+            return {
+
+              id:
+                `fixture-${match.id}`,
+
+              date:
+                match.utcDate,
+
+              status:
+                match.status,
+
+              statusLong:
+                "Scheduled",
+
+              league:
+                competition.name ||
+                "European football",
+
+              leagueCode:
+                competition.code ||
+                "",
+
+              leagueId:
+                competition.id ??
+                null,
+
+              homeTeam: {
+
+                id:
+                  home.id ??
+                  null,
+
+                name:
+                  home.name ||
+                  "Home",
+
+                shortName:
+                  home.shortName ||
+                  home.tla ||
+                  home.name ||
+                  "Home",
+
+                crest:
+                  home.crest ||
+                  ""
+              },
+
+              awayTeam: {
+
+                id:
+                  away.id ??
+                  null,
+
+                name:
+                  away.name ||
+                  "Away",
+
+                shortName:
+                  away.shortName ||
+                  away.tla ||
+                  away.name ||
+                  "Away",
+
+                crest:
+                  away.crest ||
+                  ""
+              },
+
+              score: {
+
+                home:
+                  null,
+
+                away:
+                  null
+              }
+            };
+          }
+        );
+
+
+    return {
+
+      events,
+
+      count:
+        events.length,
+
+      source:
+        "football-data.org",
+
+      dateFrom,
+
+      dateTo,
+
+      message:
+        events.length
+          ? null
+          : "No fixtures returned for this period."
+    };
+
+  } catch (error) {
+
+    return {
+
+      events: [],
+
+      count:
+        0,
+
+      source:
+        "football-data.org",
+
+      message:
+        `Fixtures request failed: ${String(error)}`
+    };
+  }
+}
+
+
+/* =====================================================
+   BBC RSS NEWS
+===================================================== */
+
+function xmlValue(
+  xml,
+  tag
+) {
+
+  const regex =
+    new RegExp(
+      `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
+      "i"
+    );
+
+
+  const match =
+    xml.match(
+      regex
+    );
+
+
+  return match
+    ? decodeHtml(
+        match[1]
+      ).trim()
+    : "";
+}
+
+
+function parseBBCNews(
+  xml
+) {
+
+  const articles = [];
+
+  const itemRegex =
+    /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
+
+  let match;
+
+
+  while (
+    (match =
+      itemRegex.exec(
+        xml
+      )) !== null
+  ) {
+
+    const item =
+      match[1];
+
+
+    const title =
+      xmlValue(
+        item,
+        "title"
+      );
+
+
+    const link =
+      xmlValue(
+        item,
+        "link"
+      );
+
+
+    const description =
+      xmlValue(
+        item,
+        "description"
+      );
+
+
+    const published =
+      xmlValue(
+        item,
+        "pubDate"
+      );
+
+
+    if (
+      !title ||
+      !link
+    ) {
+      continue;
+    }
+
+
+    articles.push({
+
+      title,
+
+      link,
+
+      description,
+
+      published,
+
+      source:
+        "BBC Sport"
+    });
+  }
+
+
+  return articles.slice(
+    0,
+    12
+  );
+}
+
+
+/* =====================================================
+   BBC HTML FALLBACK
+===================================================== */
+
+function parseBBCPage(
+  html
+) {
+
+  const articles = [];
+
+  const seen =
+    new Set();
+
+
+  /*
+    Look for BBC Sport football article
+    links.
+
+    This is only a fallback if RSS
+    does not work.
+  */
+
+  const regex =
+    /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+
+  let match;
+
+
+  while (
+    (match =
+      regex.exec(html)) !== null
+  ) {
+
+    let href =
+      match[1] || "";
+
+
+    let title =
+      stripTags(
+        match[2]
+      );
+
+
+    title =
+      cleanText(
+        title
+      );
+
+
+    if (
+      !title ||
+      title.length < 15
+    ) {
+      continue;
+    }
+
+
+    /*
+      BBC article URLs.
+    */
+
+    if (
+      !href.includes(
+        "/sport/football/"
+      )
+    ) {
+      continue;
+    }
+
+
+    /*
+      Ignore generic navigation.
+    */
+
+    const lower =
+      title.toLowerCase();
+
+
+    if (
+      lower === "football" ||
+      lower === "scores & fixtures" ||
+      lower === "scores and fixtures" ||
+      lower === "tables" ||
+      lower === "results" ||
+      lower === "fixtures"
+    ) {
+      continue;
+    }
+
+
+    /*
+      Convert relative BBC URLs.
+    */
+
+    if (
+      href.startsWith("/")
+    ) {
+
+      href =
+        `https://www.bbc.com${href}`;
+    }
+
+
+    if (
+      !href.startsWith(
+        "http"
+      )
+    ) {
+      continue;
+    }
+
+
+    if (
+      seen.has(href)
+    ) {
+      continue;
+    }
+
+
+    seen.add(href);
+
+
+    articles.push({
+
+      title,
+
+      link:
+        href,
+
+      description:
+        "",
+
+      published:
+        "",
+
+      source:
+        "BBC Sport"
+    });
+
+
+    if (
+      articles.length >= 12
+    ) {
+      break;
+    }
+  }
+
+
+  return articles;
+}
+
+
+/* =====================================================
+   GET NEWS
+===================================================== */
+
+async function getNews() {
+
+  /*
+    FIRST:
+    BBC RSS.
+  */
+
+  try {
+
+    const response =
+      await fetchWithTimeout(
+        BBC_RSS_URL,
+        {
+          headers: {
+
+            "User-Agent":
+              "Mozilla/5.0 (compatible; YepFootball/1.0)",
+
+            "Accept":
+              "application/rss+xml, application/xml, text/xml, */*",
+
+            "Accept-Language":
+              "en-GB,en;q=0.9"
+          }
+        },
+        9000
+      );
+
+
+    if (
+      response.ok
+    ) {
+
+      const xml =
+        await response.text();
+
+
+      const articles =
+        parseBBCNews(
+          xml
+        );
+
+
+      if (
+        articles.length
+      ) {
+
+        return {
+
+          articles,
+
+          source:
+            "BBC Sport RSS",
+
+          updated:
+            nowISO(),
+
+          message:
+            null
+        };
+      }
+    }
+
+  } catch {
+    /*
+      Continue to BBC HTML.
+    */
+  }
+
+
+  /*
+    SECOND:
+    BBC Sport football page.
+  */
+
+  try {
+
+    const response =
+      await fetchWithTimeout(
+        BBC_FOOTBALL_URL,
+        {
+          headers: {
+
+            "User-Agent":
+              "Mozilla/5.0 (compatible; YepFootball/1.0)",
+
+            "Accept":
+              "text/html,application/xhtml+xml",
+
+            "Accept-Language":
+              "en-GB,en;q=0.9"
+          }
+        },
+        9000
+      );
+
+
+    if (
+      response.ok
+    ) {
+
+      const html =
+        await response.text();
+
+
+      const articles =
+        parseBBCPage(
+          html
+        );
+
+
+      if (
+        articles.length
+      ) {
+
+        return {
+
+          articles,
+
+          source:
+            "BBC Sport",
+
+          updated:
+            nowISO(),
+
+          message:
+            null
+        };
+      }
+    }
+
+  } catch {
+    /*
+      Continue to final error.
+    */
+  }
+
+
+  /*
+    Both BBC sources failed.
+  */
+
+  return {
+
+    articles: [],
+
+    source:
+      "BBC Sport",
+
+    updated:
+      nowISO(),
+
+    message:
+      "BBC Sport RSS and BBC football page were unavailable."
+  };
+}
+
+
+/* =====================================================
    API-FOOTBALL
-   ONLY FOR MATCH CENTRE
+   MATCH CENTRE ONLY
 ===================================================== */
 
 async function getLiveMatches(
   env
 ) {
 
-  if (!env.API_FOOTBALL_KEY) {
+  if (
+    !env.API_FOOTBALL_KEY
+  ) {
 
     return {
 
       events: [],
+
       live: [],
+
       finished: [],
+
       upcoming: [],
 
-      count: 0,
+      count:
+        0,
 
-      liveCount: 0,
+      liveCount:
+        0,
 
       message:
         "API-Football key not configured."
@@ -1348,7 +2151,8 @@ async function getLiveMatches(
 
   const url =
     `${API_FOOTBALL_URL}` +
-    `/fixtures?live=39-2-3-848-140-135-78-61`;
+    `/fixtures?live=` +
+    `39-2-3-848-140-135-78-61`;
 
 
   try {
@@ -1358,6 +2162,7 @@ async function getLiveMatches(
         url,
         {
           headers: {
+
             "x-apisports-key":
               env.API_FOOTBALL_KEY
           }
@@ -1380,106 +2185,116 @@ async function getLiveMatches(
 
     const events =
       (data.response || [])
-        .map(item => {
+        .map(
+          item => {
 
-          const fixture =
-            item.fixture || {};
+            const fixture =
+              item.fixture ||
+              {};
 
-          const league =
-            item.league || {};
+            const league =
+              item.league ||
+              {};
 
-          const teams =
-            item.teams || {};
+            const teams =
+              item.teams ||
+              {};
 
-          const goals =
-            item.goals || {};
+            const goals =
+              item.goals ||
+              {};
 
-          const status =
-            fixture.status || {};
+            const status =
+              fixture.status ||
+              {};
 
 
-          return {
-
-            id:
-              fixture.id,
-
-            date:
-              fixture.date,
-
-            status:
-              status.short ||
-              "LIVE",
-
-            statusLong:
-              status.long || "",
-
-            minute:
-              status.elapsed ??
-              null,
-
-            league:
-              league.name ||
-              "Football",
-
-            leagueCode:
-              league.id != null
-                ? String(league.id)
-                : "",
-
-            leagueId:
-              league.id ??
-              null,
-
-            homeTeam: {
+            return {
 
               id:
-                teams.home?.id ??
+                fixture.id,
+
+              date:
+                fixture.date,
+
+              status:
+                status.short ||
+                "LIVE",
+
+              statusLong:
+                status.long ||
+                "",
+
+              minute:
+                status.elapsed ??
                 null,
 
-              name:
-                teams.home?.name ||
-                "Home",
+              league:
+                league.name ||
+                "Football",
 
-              shortName:
-                teams.home?.name ||
-                "Home",
+              leagueCode:
+                league.id != null
+                  ? String(
+                      league.id
+                    )
+                  : "",
 
-              crest:
-                teams.home?.logo ||
-                ""
-            },
-
-            awayTeam: {
-
-              id:
-                teams.away?.id ??
+              leagueId:
+                league.id ??
                 null,
 
-              name:
-                teams.away?.name ||
-                "Away",
+              homeTeam: {
 
-              shortName:
-                teams.away?.name ||
-                "Away",
+                id:
+                  teams.home?.id ??
+                  null,
 
-              crest:
-                teams.away?.logo ||
-                ""
-            },
+                name:
+                  teams.home?.name ||
+                  "Home",
 
-            score: {
+                shortName:
+                  teams.home?.name ||
+                  "Home",
 
-              home:
-                goals.home ??
-                null,
+                crest:
+                  teams.home?.logo ||
+                  ""
+              },
 
-              away:
-                goals.away ??
-                null
-            }
-          };
-        });
+              awayTeam: {
+
+                id:
+                  teams.away?.id ??
+                  null,
+
+                name:
+                  teams.away?.name ||
+                  "Away",
+
+                shortName:
+                  teams.away?.name ||
+                  "Away",
+
+                crest:
+                  teams.away?.logo ||
+                  ""
+              },
+
+              score: {
+
+                home:
+                  goals.home ??
+                  null,
+
+                away:
+                  goals.away ??
+                  null
+              }
+            };
+          }
+        );
 
 
     const live =
@@ -1548,391 +2363,18 @@ async function getLiveMatches(
     return {
 
       events: [],
+
       live: [],
+
       finished: [],
+
       upcoming: [],
 
-      count: 0,
-
-      liveCount: 0,
-
-      message:
-        String(error)
-    };
-  }
-}
-
-
-/* =====================================================
-   FIXTURES
-===================================================== */
-
-async function getFixtures(
-  env
-) {
-
-  if (!env.FOOTBALL_DATA_TOKEN) {
-
-    return {
-
-      events: [],
-
-      count: 0,
-
-      message:
-        "Football-data token not configured."
-    };
-  }
-
-
-  const today =
-    new Date();
-
-
-  const future =
-    new Date(
-      today.getTime() +
-      7 * 24 * 60 * 60 * 1000
-    );
-
-
-  const dateFrom =
-    today
-      .toISOString()
-      .slice(0, 10);
-
-
-  const dateTo =
-    future
-      .toISOString()
-      .slice(0, 10);
-
-
-  const url =
-    `${FOOTBALL_DATA_URL}` +
-    `/matches?dateFrom=${dateFrom}` +
-    `&dateTo=${dateTo}` +
-    `&competitions=` +
-    `${FOOTBALL_DATA_COMPETITIONS.join(",")}`;
-
-
-  try {
-
-    const response =
-      await fetchWithTimeout(
-        url,
-        {
-          headers:
-            footballDataHeaders(env)
-        },
-        7000
-      );
-
-
-    if (!response.ok) {
-
-      throw new Error(
-        `football-data HTTP ${response.status}`
-      );
-    }
-
-
-    const data =
-      await response.json();
-
-
-    const events =
-      (data.matches || [])
-        .filter(
-          match =>
-            [
-              "SCHEDULED",
-              "TIMED"
-            ].includes(
-              match.status
-            )
-        )
-        .map(
-          match => {
-
-            const competition =
-              match.competition || {};
-
-            const home =
-              match.homeTeam || {};
-
-            const away =
-              match.awayTeam || {};
-
-
-            return {
-
-              id:
-                match.id,
-
-              date:
-                match.utcDate,
-
-              status:
-                match.status,
-
-              statusLong:
-                "Scheduled",
-
-              league:
-                competition.name ||
-                "European football",
-
-              leagueCode:
-                competition.code ||
-                "",
-
-              leagueId:
-                null,
-
-              homeTeam: {
-
-                id:
-                  home.id ??
-                  null,
-
-                name:
-                  home.name ||
-                  "Home",
-
-                shortName:
-                  home.shortName ||
-                  home.tla ||
-                  home.name ||
-                  "Home",
-
-                crest:
-                  home.crest ||
-                  ""
-              },
-
-              awayTeam: {
-
-                id:
-                  away.id ??
-                  null,
-
-                name:
-                  away.name ||
-                  "Away",
-
-                shortName:
-                  away.shortName ||
-                  away.tla ||
-                  away.name ||
-                  "Away",
-
-                crest:
-                  away.crest ||
-                  ""
-              },
-
-              score: {
-
-                home:
-                  null,
-
-                away:
-                  null
-              }
-            };
-          }
-        );
-
-
-    return {
-
-      events,
-
       count:
-        events.length,
+        0,
 
-      message:
-        null
-    };
-
-  } catch (error) {
-
-    return {
-
-      events: [],
-
-      count: 0,
-
-      message:
-        String(error)
-    };
-  }
-}
-
-
-/* =====================================================
-   BBC NEWS
-===================================================== */
-
-function xmlValue(
-  xml,
-  tag
-) {
-
-  const regex =
-    new RegExp(
-      `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
-      "i"
-    );
-
-
-  const match =
-    xml.match(regex);
-
-
-  return match
-    ? decodeHtml(
-        match[1]
-      ).trim()
-    : "";
-}
-
-
-function parseBBCNews(
-  xml
-) {
-
-  const articles = [];
-
-
-  const itemRegex =
-    /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
-
-
-  let match;
-
-
-  while (
-    (match =
-      itemRegex.exec(xml)) !== null
-  ) {
-
-    const item =
-      match[1];
-
-
-    const title =
-      xmlValue(
-        item,
-        "title"
-      );
-
-
-    const link =
-      xmlValue(
-        item,
-        "link"
-      );
-
-
-    const description =
-      xmlValue(
-        item,
-        "description"
-      );
-
-
-    const published =
-      xmlValue(
-        item,
-        "pubDate"
-      );
-
-
-    if (
-      !title ||
-      !link
-    ) {
-      continue;
-    }
-
-
-    articles.push({
-
-      title,
-
-      link,
-
-      description,
-
-      published,
-
-      source:
-        "BBC Sport"
-    });
-  }
-
-
-  return articles.slice(
-    0,
-    12
-  );
-}
-
-
-async function getNews() {
-
-  try {
-
-    const response =
-      await fetchWithTimeout(
-        BBC_RSS_URL,
-        {
-          headers: {
-            "User-Agent":
-              "YepFootball/1.0"
-          }
-        },
-        7000
-      );
-
-
-    if (!response.ok) {
-
-      throw new Error(
-        `BBC HTTP ${response.status}`
-      );
-    }
-
-
-    const xml =
-      await response.text();
-
-
-    return {
-
-      articles:
-        parseBBCNews(xml),
-
-      source:
-        "BBC Sport",
-
-      updated:
-        nowISO()
-    };
-
-  } catch (error) {
-
-    return {
-
-      articles: [],
-
-      source:
-        "BBC Sport",
-
-      updated:
-        nowISO(),
+      liveCount:
+        0,
 
       message:
         String(error)
@@ -1953,7 +2395,9 @@ async function health(
     "not configured";
 
 
-  if (env.LATEST_SCORES) {
+  if (
+    env.LATEST_SCORES
+  ) {
 
     try {
 
@@ -1974,7 +2418,8 @@ async function health(
 
   return {
 
-    ok: true,
+    ok:
+      true,
 
     version:
       VERSION,
@@ -2000,6 +2445,12 @@ async function health(
     dailyScoresSource:
       "Soccerbase + football-data.org",
 
+    fixturesSource:
+      "football-data.org",
+
+    newsSource:
+      "BBC Sport RSS + BBC Sport fallback",
+
     apiFootballUsedForLatestScores:
       false
   };
@@ -2018,23 +2469,26 @@ async function handleAPI(
   const url =
     new URL(request.url);
 
-
   const path =
     url.pathname;
 
 
   if (
-    path === "/api/health"
+    path ===
+    "/api/health"
   ) {
 
     return json(
-      await health(env)
+      await health(
+        env
+      )
     );
   }
 
 
   if (
-    path === "/api/scores"
+    path ===
+    "/api/scores"
   ) {
 
     const force =
@@ -2066,7 +2520,8 @@ async function handleAPI(
 
 
   if (
-    path === "/api/fixtures"
+    path ===
+    "/api/fixtures"
   ) {
 
     return json(
@@ -2078,7 +2533,8 @@ async function handleAPI(
 
 
   if (
-    path === "/api/news"
+    path ===
+    "/api/news"
   ) {
 
     return json(
@@ -2089,7 +2545,9 @@ async function handleAPI(
 
   return json(
     {
-      ok: false,
+      ok:
+        false,
+
       error:
         "API endpoint not found."
     },
@@ -2111,7 +2569,9 @@ export default {
   ) {
 
     const url =
-      new URL(request.url);
+      new URL(
+        request.url
+      );
 
 
     if (
