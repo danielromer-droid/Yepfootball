@@ -1,57 +1,83 @@
-/* =====================================================
-   YepFootball Worker
+/* =========================================================
+   YepFootball Cloudflare Worker
    Version: 2026-09-21.1
 
-   SCORES
-   - Soccerbase
-   - football-data.org supplement
-   - No API-Football for daily scores
+   ARCHITECTURE
 
-   MATCH CENTRE
-   - API-Football
+   /api/scores
+      -> LATEST_SCORES KV
+      -> Existing scores snapshot preserved
 
-   FIXTURES
-   - Single football-data.org request
-   - 7 days ahead
+   /api/fixtures
+      -> football-data.org v4
+      -> Upcoming fixtures
+      -> PL, CL, PD, SA, BL1, FL1
 
-   NEWS
-   - BBC Sport RSS
-   - BBC Sport football page fallback
+   /api/news
+      -> BBC Sport Football RSS
+      -> CDATA cleaned
 
-   FIXES
-   - Soccerbase date cannot become a score
-   - Correct competition boundaries
-   - Fixtures uses one API request
-   - BBC RSS has fallback
-   - Health reports fixture/news status
-===================================================== */
+   /api/match-centre
+      -> API-Football
 
-const VERSION = "2026-09-21.1";
+   /api/health
+      -> Diagnostics
+========================================================= */
 
-const TZ = "Europe/Paris";
 
-const SCORE_KEY = "latest_scores";
-const OLD_SCORE_KEY = "yesterday_scores";
+/* =========================================================
+   CONFIGURATION
+========================================================= */
 
-const SOCCERBASE_URL =
-  "https://www.soccerbase.com/matches/results.sd";
-
-const FOOTBALL_DATA_URL =
+const FOOTBALL_DATA_BASE =
   "https://api.football-data.org/v4";
 
-const API_FOOTBALL_URL =
+const API_FOOTBALL_BASE =
   "https://v3.football.api-sports.io";
 
-const BBC_RSS_URL =
+const BBC_RSS =
   "https://feeds.bbci.co.uk/sport/football/rss.xml";
 
-const BBC_FOOTBALL_URL =
-  "https://www.bbc.com/sport/football";
+
+/*
+   Football-data.org competitions
+*/
+const COMPETITIONS = {
+  PL: "Premier League",
+  CL: "UEFA Champions League",
+  PD: "La Liga",
+  SA: "Serie A",
+  BL1: "Bundesliga",
+  FL1: "Ligue 1"
+};
 
 
-/* =====================================================
-   GENERAL HELPERS
-===================================================== */
+/*
+   API-Football competition IDs
+*/
+const API_FOOTBALL_LEAGUES = {
+  PL: 39,
+  CL: 2,
+  PD: 140,
+  SA: 135,
+  BL1: 78,
+  FL1: 61
+};
+
+
+/* =========================================================
+   COMMON RESPONSE HELPERS
+========================================================= */
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Cache-Control": "no-store"
+  };
+}
+
 
 function json(data, status = 200) {
   return new Response(
@@ -59,2409 +85,1128 @@ function json(data, status = 200) {
     {
       status,
       headers: {
-        "Content-Type":
-          "application/json; charset=utf-8",
-
-        "Cache-Control":
-          "no-store"
+        ...corsHeaders(),
+        "Content-Type": "application/json; charset=utf-8"
       }
     }
   );
 }
 
 
-function nowISO() {
-  return new Date().toISOString();
+/* =========================================================
+   DATE HELPERS
+========================================================= */
+
+function isoDate(date) {
+  return date.toISOString().slice(0, 10);
 }
 
 
-function cleanText(value) {
-  return String(value || "")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&#x27;/gi, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+function todayUTC() {
+  return isoDate(new Date());
 }
 
 
-function decodeHtml(value) {
-  return String(value || "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&#x27;/gi, "'")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&#(\d+);/g, (_, n) => {
-      try {
-        return String.fromCharCode(Number(n));
-      } catch {
-        return "";
-      }
-    })
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => {
-      try {
-        return String.fromCharCode(
-          parseInt(n, 16)
-        );
-      } catch {
-        return "";
-      }
-    });
+function addDays(dateString, days) {
+  const d = new Date(`${dateString}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return isoDate(d);
 }
 
 
-function normalize(value) {
-  return cleanText(
-    decodeHtml(value)
-  )
-    .toLowerCase()
-    .replace(
-      /[^\p{L}\p{N}]+/gu,
-      " "
-    )
-    .trim();
-}
+/* =========================================================
+   /api/scores
+   ---------------------------------------------------------
+   IMPORTANT:
+   This keeps the existing LATEST_SCORES architecture.
+
+   The frontend expects:
+
+      events
+      live
+      finished
+      upcoming
+      count
+      liveCount
+      message
+      updated
+========================================================= */
+
+async function latestScores(env) {
+
+  if (!env.LATEST_SCORES) {
+    return {
+      events: [],
+      live: [],
+      finished: [],
+      upcoming: [],
+      count: 0,
+      liveCount: 0,
+      message: "LATEST_SCORES KV binding is missing.",
+      updated: new Date().toISOString()
+    };
+  }
 
 
-function teamKey(value) {
-  return normalize(value)
-    .replace(
-      /\b(fc|cf|sc|afc)\b/g,
-      ""
-    )
-    .replace(/\s+/g, " ")
-    .trim();
-}
+  /*
+     The existing snapshot is stored under "latest".
+  */
+
+  let raw = null;
+
+  try {
+    raw = await env.LATEST_SCORES.get("latest");
+  } catch (error) {
+    return {
+      events: [],
+      live: [],
+      finished: [],
+      upcoming: [],
+      count: 0,
+      liveCount: 0,
+      message: "Unable to read LATEST_SCORES.",
+      error: String(error),
+      updated: new Date().toISOString()
+    };
+  }
 
 
-async function fetchWithTimeout(
-  url,
-  options = {},
-  timeoutMs = 8000
-) {
+  if (!raw) {
+    return {
+      events: [],
+      live: [],
+      finished: [],
+      upcoming: [],
+      count: 0,
+      liveCount: 0,
+      message: "No scores snapshot available yet.",
+      updated: new Date().toISOString()
+    };
+  }
 
-  const controller =
-    new AbortController();
-
-  const timer =
-    setTimeout(
-      () => controller.abort(),
-      timeoutMs
-    );
 
   try {
 
-    return await fetch(
-      url,
-      {
-        ...options,
-        signal:
-          controller.signal
-      }
-    );
+    const data = JSON.parse(raw);
 
-  } finally {
-
-    clearTimeout(timer);
-  }
-}
-
-
-/* =====================================================
-   DATE
-===================================================== */
-
-function getYesterdayString() {
-
-  const now =
-    new Date();
-
-  const local =
-    new Intl.DateTimeFormat(
-      "en-CA",
-      {
-        timeZone: TZ,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit"
-      }
-    ).formatToParts(now);
-
-  const values = {};
-
-  for (
-    const item
-    of local
-  ) {
+    /*
+       If the stored snapshot already has the expected
+       structure, return it essentially unchanged.
+    */
 
     if (
-      item.type !==
-      "literal"
+      data &&
+      Array.isArray(data.events) &&
+      Array.isArray(data.live) &&
+      Array.isArray(data.finished) &&
+      Array.isArray(data.upcoming)
     ) {
 
-      values[item.type] =
-        item.value;
-    }
-  }
+      return {
+        ...data,
+        count: Number.isFinite(data.count)
+          ? data.count
+          : data.events.length,
 
-  const todayUTC =
-    new Date(
-      `${values.year}-${values.month}-${values.day}T12:00:00Z`
-    );
+        liveCount: Number.isFinite(data.liveCount)
+          ? data.liveCount
+          : data.live.length,
 
-  todayUTC.setUTCDate(
-    todayUTC.getUTCDate() - 1
-  );
-
-  return todayUTC
-    .toISOString()
-    .slice(0, 10);
-}
-
-
-/* =====================================================
-   SOCCERBASE COMPETITIONS
-===================================================== */
-
-const SOCCERBASE_COMPETITIONS = [
-
-  {
-    names: [
-      "premier league"
-    ],
-    league:
-      "Premier League",
-    leagueId:
-      39,
-    leagueCode:
-      "PL"
-  },
-
-  {
-    names: [
-      "italian serie a"
-    ],
-    league:
-      "Serie A",
-    leagueId:
-      135,
-    leagueCode:
-      "SA"
-  },
-
-  {
-    names: [
-      "german bundesliga"
-    ],
-    league:
-      "Bundesliga",
-    leagueId:
-      78,
-    leagueCode:
-      "BL1"
-  },
-
-  {
-    names: [
-      "spanish la liga"
-    ],
-    league:
-      "La Liga",
-    leagueId:
-      140,
-    leagueCode:
-      "PD"
-  },
-
-  {
-    names: [
-      "french ligue 1"
-    ],
-    league:
-      "Ligue 1",
-    leagueId:
-      61,
-    leagueCode:
-      "FL1"
-  },
-
-  {
-    names: [
-      "uefa champions league",
-      "champions league"
-    ],
-    league:
-      "Champions League",
-    leagueId:
-      2,
-    leagueCode:
-      "CL"
-  },
-
-  {
-    names: [
-      "uefa europa league",
-      "europa league"
-    ],
-    league:
-      "Europa League",
-    leagueId:
-      3,
-    leagueCode:
-      "EL"
-  },
-
-  {
-    names: [
-      "uefa europa conference league",
-      "europa conference league",
-      "conference league"
-    ],
-    league:
-      "Conference League",
-    leagueId:
-      848,
-    leagueCode:
-      "ECL"
-  }
-];
-
-
-function findCompetition(
-  heading
-) {
-
-  const normalizedHeading =
-    normalize(
-      heading
-    );
-
-  return SOCCERBASE_COMPETITIONS.find(
-    competition =>
-      competition.names.some(
-        name =>
-          normalizedHeading ===
-          normalize(name)
-      )
-  );
-}
-
-
-/* =====================================================
-   SOCCERBASE HELPERS
-===================================================== */
-
-function stripTags(value) {
-
-  return decodeHtml(
-    String(value || "")
-      .replace(
-        /<[^>]+>/g,
-        " "
-      )
-  )
-    .replace(
-      /\s+/g,
-      " "
-    )
-    .trim();
-}
-
-
-function extractAnchors(html) {
-
-  const anchors = [];
-
-  const regex =
-    /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
-
-  let match;
-
-  while (
-    (match =
-      regex.exec(html)) !== null
-  ) {
-
-    const text =
-      stripTags(
-        match[2]
-      );
-
-    if (!text) {
-      continue;
-    }
-
-    anchors.push({
-      text,
-      normalized:
-        normalize(text),
-      attributes:
-        match[1] || ""
-    });
-  }
-
-  return anchors;
-}
-
-
-function parseScoreText(
-  value
-) {
-
-  const text =
-    cleanText(value);
-
-  const match =
-    text.match(
-      /^(\d{1,2})\s*-\s*(\d{1,2})$/
-    );
-
-  if (!match) {
-    return null;
-  }
-
-  return {
-    home:
-      Number(match[1]),
-
-    away:
-      Number(match[2])
-  };
-}
-
-
-/* =====================================================
-   SOCCERBASE SCORE PARSER
-===================================================== */
-
-function parseSoccerbase(
-  html,
-  date
-) {
-
-  const events = [];
-
-  const headingRegex =
-    /<h2\b[^>]*>([\s\S]*?)<\/h2>/gi;
-
-  const headings = [];
-
-  let headingMatch;
-
-  while (
-    (headingMatch =
-      headingRegex.exec(html)) !== null
-  ) {
-
-    const headingText =
-      stripTags(
-        headingMatch[1]
-      );
-
-    headings.push({
-
-      position:
-        headingMatch.index,
-
-      end:
-        headingRegex.lastIndex,
-
-      heading:
-        headingText,
-
-      competition:
-        findCompetition(
-          headingText
-        )
-    });
-  }
-
-
-  for (
-    let i = 0;
-    i < headings.length;
-    i++
-  ) {
-
-    const section =
-      headings[i];
-
-    if (
-      !section.competition
-    ) {
-      continue;
+        updated:
+          data.updated ||
+          new Date().toISOString()
+      };
     }
 
 
-    const nextPosition =
-      i + 1 <
-      headings.length
-        ? headings[i + 1].position
-        : html.length;
-
-
-    const sectionHtml =
-      html.slice(
-        section.end,
-        nextPosition
-      );
-
-
-    const rowRegex =
-      /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
-
-    let rowMatch;
-
-
-    while (
-      (rowMatch =
-        rowRegex.exec(
-          sectionHtml
-        )) !== null
-    ) {
-
-      const rowHtml =
-        rowMatch[1];
-
-      const anchors =
-        extractAnchors(
-          rowHtml
-        );
-
-
-      if (
-        anchors.length < 3
-      ) {
-        continue;
-      }
-
-
-      let scoreIndex =
-        -1;
-
-      let score =
-        null;
-
-
-      for (
-        let a = 0;
-        a < anchors.length;
-        a++
-      ) {
-
-        const parsed =
-          parseScoreText(
-            anchors[a].text
-          );
-
-        if (!parsed) {
-          continue;
-        }
-
-        scoreIndex =
-          a;
-
-        score =
-          parsed;
-
-        break;
-      }
-
-
-      if (
-        scoreIndex < 0 ||
-        !score
-      ) {
-        continue;
-      }
-
-
-      if (
-        scoreIndex <= 0 ||
-        scoreIndex >=
-          anchors.length - 1
-      ) {
-        continue;
-      }
-
-
-      const home =
-        anchors[
-          scoreIndex - 1
-        ].text;
-
-
-      const away =
-        anchors[
-          scoreIndex + 1
-        ].text;
-
-
-      if (
-        !home ||
-        !away
-      ) {
-        continue;
-      }
-
-
-      const homeNormalized =
-        normalize(home);
-
-      const awayNormalized =
-        normalize(away);
-
-
-      if (
-        homeNormalized.includes(
-          "football"
-        ) ||
-        awayNormalized.includes(
-          "football"
-        )
-      ) {
-        continue;
-      }
-
-
-      if (
-        homeNormalized.includes(
-          "results"
-        ) ||
-        awayNormalized.includes(
-          "results"
-        )
-      ) {
-        continue;
-      }
-
-
-      if (
-        /\b20\d{2}\b/.test(home) ||
-        /\b20\d{2}\b/.test(away)
-      ) {
-        continue;
-      }
-
-
-      events.push({
-
-        id:
-          `web-${date}-` +
-          `${section.competition.leagueCode}-` +
-          `${teamKey(home)}-` +
-          `${teamKey(away)}`,
-
-        date:
-          `${date}T12:00:00Z`,
-
-        status:
-          "FINISHED",
-
-        statusLong:
-          "Full Time",
-
-        minute:
-          null,
-
-        league:
-          section.competition.league,
-
-        leagueCode:
-          section.competition.leagueCode,
-
-        leagueId:
-          section.competition.leagueId,
-
-        homeTeam: {
-
-          id:
-            null,
-
-          name:
-            home,
-
-          shortName:
-            home,
-
-          crest:
-            ""
-        },
-
-        awayTeam: {
-
-          id:
-            null,
-
-          name:
-            away,
-
-          shortName:
-            away,
-
-          crest:
-            ""
-        },
-
-        score:
-          score
-      });
-    }
-  }
-
-  return events;
-}
-
-
-/* =====================================================
-   SOCCERBASE REQUEST
-===================================================== */
-
-async function getSoccerbaseResults(
-  date
-) {
-
-  const url =
-    `${SOCCERBASE_URL}?date=` +
-    `${encodeURIComponent(date)}`;
-
-  try {
-
-    const response =
-      await fetchWithTimeout(
-        url,
-        {
-          headers: {
-
-            "User-Agent":
-              "YepFootball/1.0",
-
-            "Accept":
-              "text/html,application/xhtml+xml"
-          }
-        },
-        8000
-      );
-
-
-    if (!response.ok) {
-
-      throw new Error(
-        `Soccerbase HTTP ${response.status}`
-      );
-    }
-
-
-    const html =
-      await response.text();
-
+    /*
+       If the KV contains only an events array,
+       rebuild the categories.
+    */
 
     const events =
-      parseSoccerbase(
-        html,
-        date
-      );
+      Array.isArray(data)
+        ? data
+        : Array.isArray(data.events)
+          ? data.events
+          : [];
+
+
+    const live = [];
+    const finished = [];
+    const upcoming = [];
+
+
+    for (const event of events) {
+
+      const status =
+        String(
+          event.status ||
+          event.statusShort ||
+          ""
+        ).toUpperCase();
+
+
+      if (
+        status === "LIVE" ||
+        status === "IN_PLAY" ||
+        status === "PAUSED" ||
+        status === "1H" ||
+        status === "2H" ||
+        status === "HT"
+      ) {
+
+        live.push(event);
+
+      } else if (
+        status === "FINISHED" ||
+        status === "FT" ||
+        status === "AET" ||
+        status === "PEN" ||
+        status === "AWARDED" ||
+        status === "POSTPONED" ||
+        status === "CANCELLED" ||
+        status === "SUSPENDED"
+      ) {
+
+        finished.push(event);
+
+      } else {
+
+        upcoming.push(event);
+
+      }
+    }
 
 
     return {
-
-      ok:
-        true,
-
       events,
-
+      live,
+      finished,
+      upcoming,
+      count: events.length,
+      liveCount: live.length,
       message:
-        null
+        events.length
+          ? ""
+          : "No matches scheduled today.",
+      updated:
+        data.updated ||
+        new Date().toISOString()
     };
 
   } catch (error) {
 
     return {
-
-      ok:
-        false,
-
       events: [],
-
-      message:
-        String(error)
+      live: [],
+      finished: [],
+      upcoming: [],
+      count: 0,
+      liveCount: 0,
+      message: "Invalid scores snapshot.",
+      error: String(error),
+      updated: new Date().toISOString()
     };
   }
 }
 
 
-/* =====================================================
-   FOOTBALL-DATA.ORG
-===================================================== */
+/* =========================================================
+   FOOTBALL-DATA.ORG REQUEST
+========================================================= */
 
-const FOOTBALL_DATA_COMPETITIONS = [
-  "PL",
-  "PD",
-  "SA",
-  "BL1",
-  "FL1",
-  "CL"
-];
+async function footballDataFetch(url, env) {
 
-
-function footballDataHeaders(
-  env
-) {
-
-  return {
-
-    "X-Auth-Token":
-      env.FOOTBALL_DATA_TOKEN ||
-      "",
-
-    "Accept":
-      "application/json"
-  };
-}
+  if (!env.FOOTBALL_DATA_TOKEN) {
+    throw new Error(
+      "Missing Cloudflare secret FOOTBALL_DATA_TOKEN"
+    );
+  }
 
 
-function mapFootballDataMatch(
-  match
-) {
-
-  const competition =
-    match.competition ||
-    {};
-
-  const code =
-    competition.code ||
-    "";
-
-
-  const leagueMap = {
-
-    PL: {
-      name:
-        "Premier League",
-      id:
-        39
-    },
-
-    PD: {
-      name:
-        "La Liga",
-      id:
-        140
-    },
-
-    SA: {
-      name:
-        "Serie A",
-      id:
-        135
-    },
-
-    BL1: {
-      name:
-        "Bundesliga",
-      id:
-        78
-    },
-
-    FL1: {
-      name:
-        "Ligue 1",
-      id:
-        61
-    },
-
-    CL: {
-      name:
-        "Champions League",
-      id:
-        2
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      "X-Auth-Token": env.FOOTBALL_DATA_TOKEN,
+      "Accept": "application/json"
     }
-  };
+  });
 
 
-  const league =
-    leagueMap[code] ||
-    {
-      name:
-        competition.name ||
-        "Football",
+  const text = await response.text();
 
-      id:
-        null
+
+  let data;
+
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = {
+      error: text
     };
-
-
-  const score =
-    match.score ||
-    {};
-
-  const fullTime =
-    score.fullTime ||
-    {};
-
-
-  if (
-    fullTime.home == null ||
-    fullTime.away == null
-  ) {
-    return null;
   }
 
 
-  const home =
-    match.homeTeam ||
-    {};
+  if (!response.ok) {
 
-  const away =
-    match.awayTeam ||
-    {};
+    const message =
+      data?.message ||
+      data?.error ||
+      `football-data.org returned HTTP ${response.status}`;
+
+    throw new Error(message);
+  }
 
 
-  return {
-
-    id:
-      `fd-${match.id}`,
-
-    date:
-      match.utcDate ||
-      `${getYesterdayString()}T12:00:00Z`,
-
-    status:
-      "FINISHED",
-
-    statusLong:
-      "Full Time",
-
-    minute:
-      null,
-
-    league:
-      league.name,
-
-    leagueCode:
-      code,
-
-    leagueId:
-      league.id,
-
-    homeTeam: {
-
-      id:
-        home.id ??
-        null,
-
-      name:
-        home.name ||
-        "Home",
-
-      shortName:
-        home.shortName ||
-        home.tla ||
-        home.name ||
-        "Home",
-
-      crest:
-        home.crest ||
-        ""
-    },
-
-    awayTeam: {
-
-      id:
-        away.id ??
-        null,
-
-      name:
-        away.name ||
-        "Away",
-
-      shortName:
-        away.shortName ||
-        away.tla ||
-        away.name ||
-        "Away",
-
-      crest:
-        away.crest ||
-        ""
-    },
-
-    score: {
-
-      home:
-        Number(
-          fullTime.home
-        ),
-
-      away:
-        Number(
-          fullTime.away
-        )
-    }
-  };
+  return data;
 }
 
 
-/* =====================================================
-   FOOTBALL-DATA SCORES
-===================================================== */
+/* =========================================================
+   /api/fixtures
+   ---------------------------------------------------------
+   Upcoming fixtures:
 
-async function getFootballDataResults(
-  env,
-  date
-) {
+   Today -> next 30 days
 
-  if (
-    !env.FOOTBALL_DATA_TOKEN
-  ) {
-    return [];
-  }
+   Competitions:
+      PL
+      CL
+      PD
+      SA
+      BL1
+      FL1
+========================================================= */
 
+async function fixtures(env) {
 
-  const results = [];
+  const from = todayUTC();
 
+  /*
+     30 days gives the site enough future matches while
+     avoiding unnecessarily large API requests.
+  */
 
-  for (
-    const competition
-    of FOOTBALL_DATA_COMPETITIONS
-  ) {
-
-    try {
-
-      const url =
-        `${FOOTBALL_DATA_URL}` +
-        `/competitions/${competition}` +
-        `/matches?dateFrom=${date}` +
-        `&dateTo=${date}`;
+  const to = addDays(from, 30);
 
 
-      const response =
-        await fetchWithTimeout(
-          url,
-          {
-            headers:
-              footballDataHeaders(
-                env
-              )
-          },
-          7000
-        );
+  const competitions =
+    Object.keys(COMPETITIONS).join(",");
 
 
-      if (!response.ok) {
-        continue;
-      }
-
-
-      const data =
-        await response.json();
-
-
-      for (
-        const match
-        of data.matches || []
-      ) {
-
-        if (
-          match.status !==
-            "FINISHED" &&
-          match.status !==
-            "AWARDED"
-        ) {
-          continue;
-        }
-
-
-        const event =
-          mapFootballDataMatch(
-            match
-          );
-
-
-        if (event) {
-          results.push(
-            event
-          );
-        }
-      }
-
-    } catch {
-      /*
-        Ignore one failed
-        competition.
-      */
-    }
-  }
-
-
-  return results;
-}
-
-
-/* =====================================================
-   DEDUPE
-===================================================== */
-
-function dedupeEvents(
-  events
-) {
-
-  const map =
-    new Map();
-
-
-  for (
-    const event
-    of events
-  ) {
-
-    const key =
-      `${event.leagueCode || event.leagueId}` +
-      `|${teamKey(event.homeTeam?.name)}` +
-      `|${teamKey(event.awayTeam?.name)}` +
-      `|${event.score?.home}` +
-      `|${event.score?.away}`;
-
-
-    if (
-      !map.has(key)
-    ) {
-
-      map.set(
-        key,
-        event
-      );
-    }
-  }
-
-
-  return Array.from(
-    map.values()
-  );
-}
-
-
-/* =====================================================
-   SORT
-===================================================== */
-
-function sortEvents(
-  events
-) {
-
-  return events.sort(
-    (a, b) => {
-
-      const leagueOrder = {
-
-        PL: 1,
-        PD: 2,
-        SA: 3,
-        BL1: 4,
-        FL1: 5,
-        CL: 6,
-        EL: 7,
-        ECL: 8
-      };
-
-
-      const aOrder =
-        leagueOrder[
-          a.leagueCode
-        ] || 99;
-
-
-      const bOrder =
-        leagueOrder[
-          b.leagueCode
-        ] || 99;
-
-
-      if (
-        aOrder !==
-        bOrder
-      ) {
-
-        return (
-          aOrder -
-          bOrder
-        );
-      }
-
-
-      return String(
-        a.homeTeam?.name
-      ).localeCompare(
-        String(
-          b.homeTeam?.name
-        )
-      );
-    }
-  );
-}
-
-
-/* =====================================================
-   SNAPSHOT
-===================================================== */
-
-async function readSnapshot(
-  env
-) {
-
-  if (
-    !env.LATEST_SCORES
-  ) {
-    return null;
-  }
+  const url =
+    `${FOOTBALL_DATA_BASE}/matches` +
+    `?competitions=${encodeURIComponent(competitions)}` +
+    `&dateFrom=${from}` +
+    `&dateTo=${to}`;
 
 
   try {
 
     const data =
-      await env.LATEST_SCORES.get(
-        SCORE_KEY,
-        "json"
-      );
+      await footballDataFetch(url, env);
 
 
-    return data ||
-      null;
+    const matches =
+      Array.isArray(data.matches)
+        ? data.matches
+        : [];
 
-  } catch {
 
-    return null;
-  }
-}
+    /*
+       Only upcoming games.
 
+       football-data.org can use SCHEDULED or TIMED
+       for matches that have not started.
+    */
 
-async function writeSnapshot(
-  env,
-  snapshot
-) {
+    const upcoming =
+      matches
+        .filter(match => {
 
-  if (
-    !env.LATEST_SCORES
-  ) {
-    return;
-  }
+          const status =
+            String(match.status || "")
+              .toUpperCase();
 
+          return (
+            status === "SCHEDULED" ||
+            status === "TIMED"
+          );
 
-  await env.LATEST_SCORES.put(
-    SCORE_KEY,
-    JSON.stringify(
-      snapshot
-    )
-  );
+        })
+        .filter(match => {
 
+          /*
+             Additional protection:
+             only future matches from the current moment.
+          */
 
-  await env.LATEST_SCORES.put(
-    OLD_SCORE_KEY,
-    JSON.stringify(
-      snapshot
-    )
-  );
-}
+          const matchDate =
+            new Date(match.utcDate);
 
+          return (
+            !Number.isNaN(matchDate.getTime()) &&
+            matchDate.getTime() >= Date.now() - 60 * 1000
+          );
 
-/* =====================================================
-   PUBLISH SCORES
-===================================================== */
+        })
+        .map(match => {
 
-async function publishYesterday(
-  env,
-  force = false
-) {
+          const competitionCode =
+            match.competition?.code || "";
 
-  const date =
-    getYesterdayString();
 
+          return {
 
-  const existing =
-    await readSnapshot(
-      env
-    );
+            id: match.id,
 
+            date: match.utcDate,
 
-  if (
-    existing &&
-    existing.date === date &&
-    !force
-  ) {
+            status: match.status,
 
-    return existing;
-  }
+            league:
+              COMPETITIONS[competitionCode] ||
+              match.competition?.name ||
+              "Football",
 
+            leagueCode:
+              competitionCode,
 
-  const soccerbase =
-    await getSoccerbaseResults(
-      date
-    );
+            leagueId:
+              match.competition?.id ?? null,
 
-
-  let events =
-    soccerbase.events ||
-    [];
-
-
-  const footballData =
-    await getFootballDataResults(
-      env,
-      date
-    );
-
-
-  events =
-    dedupeEvents([
-      ...events,
-      ...footballData
-    ]);
-
-
-  events =
-    sortEvents(
-      events
-    );
-
-
-  if (
-    !events.length
-  ) {
-
-    if (existing) {
-      return existing;
-    }
-
-
-    return {
-
-      events: [],
-
-      count:
-        0,
-
-      date,
-
-      source:
-        "Soccerbase + football-data.org",
-
-      publishedAt:
-        nowISO(),
-
-      message:
-        "No completed matches were retrieved."
-    };
-  }
-
-
-  const snapshot = {
-
-    events,
-
-    count:
-      events.length,
-
-    date,
-
-    source:
-      "Soccerbase + football-data.org",
-
-    publishedAt:
-      nowISO(),
-
-    message:
-      null
-  };
-
-
-  await writeSnapshot(
-    env,
-    snapshot
-  );
-
-
-  return snapshot;
-}
-
-
-/* =====================================================
-   FIXTURES
-   SINGLE football-data.org REQUEST
-===================================================== */
-
-async function getFixtures(
-  env
-) {
-
-  if (
-    !env.FOOTBALL_DATA_TOKEN
-  ) {
-
-    return {
-
-      events: [],
-
-      count:
-        0,
-
-      source:
-        "football-data.org",
-
-      message:
-        "Football-data token not configured."
-    };
-  }
-
-
-  /*
-    Today + 7 days.
-  */
-
-  const now =
-    new Date();
-
-
-  const future =
-    new Date(
-      now.getTime() +
-      7 *
-      24 *
-      60 *
-      60 *
-      1000
-    );
-
-
-  const dateFrom =
-    now
-      .toISOString()
-      .slice(0, 10);
-
-
-  const dateTo =
-    future
-      .toISOString()
-      .slice(0, 10);
-
-
-  /*
-    One request for all selected
-    competitions.
-
-    football-data.org documents
-    competitions=... together with
-    dateFrom/dateTo on /v4/matches.
-  */
-
-  const competitions =
-    [
-      "PL",
-      "PD",
-      "SA",
-      "BL1",
-      "FL1",
-      "CL"
-    ].join(",");
-
-
-  const url =
-    `${FOOTBALL_DATA_URL}` +
-    `/matches?dateFrom=${dateFrom}` +
-    `&dateTo=${dateTo}` +
-    `&competitions=${competitions}`;
-
-
-  try {
-
-    const response =
-      await fetchWithTimeout(
-        url,
-        {
-          headers:
-            footballDataHeaders(
-              env
-            )
-        },
-        9000
-      );
-
-
-    const responseText =
-      await response.text();
-
-
-    if (!response.ok) {
-
-      return {
-
-        events: [],
-
-        count:
-          0,
-
-        source:
-          "football-data.org",
-
-        message:
-          `football-data HTTP ${response.status}: ${responseText.slice(0, 300)}`
-      };
-    }
-
-
-    let data;
-
-    try {
-
-      data =
-        JSON.parse(
-          responseText
-        );
-
-    } catch {
-
-      return {
-
-        events: [],
-
-        count:
-          0,
-
-        source:
-          "football-data.org",
-
-        message:
-          "football-data returned invalid JSON."
-      };
-    }
-
-
-    const events =
-      (data.matches || [])
-        .filter(
-          match =>
-            [
-              "SCHEDULED",
-              "TIMED"
-            ].includes(
-              match.status
-            )
-        )
-        .map(
-          match => {
-
-            const competition =
-              match.competition ||
-              {};
-
-            const home =
-              match.homeTeam ||
-              {};
-
-            const away =
-              match.awayTeam ||
-              {};
-
-
-            return {
-
+            homeTeam: {
               id:
-                `fixture-${match.id}`,
+                match.homeTeam?.id ?? null,
 
-              date:
-                match.utcDate,
-
-              status:
-                match.status,
-
-              statusLong:
-                "Scheduled",
-
-              league:
-                competition.name ||
-                "European football",
-
-              leagueCode:
-                competition.code ||
+              name:
+                match.homeTeam?.name ||
+                match.homeTeam?.shortName ||
                 "",
 
-              leagueId:
-                competition.id ??
-                null,
+              shortName:
+                match.homeTeam?.shortName ||
+                match.homeTeam?.name ||
+                "",
 
-              homeTeam: {
+              crest:
+                match.homeTeam?.crest ||
+                ""
+            },
 
-                id:
-                  home.id ??
-                  null,
+            awayTeam: {
+              id:
+                match.awayTeam?.id ?? null,
 
-                name:
-                  home.name ||
-                  "Home",
+              name:
+                match.awayTeam?.name ||
+                match.awayTeam?.shortName ||
+                "",
 
-                shortName:
-                  home.shortName ||
-                  home.tla ||
-                  home.name ||
-                  "Home",
+              shortName:
+                match.awayTeam?.shortName ||
+                match.awayTeam?.name ||
+                "",
 
-                crest:
-                  home.crest ||
-                  ""
-              },
+              crest:
+                match.awayTeam?.crest ||
+                ""
+            },
 
-              awayTeam: {
+            venue:
+              match.venue ||
+              "",
 
-                id:
-                  away.id ??
-                  null,
+            matchday:
+              match.matchday ??
+              null
 
-                name:
-                  away.name ||
-                  "Away",
+          };
 
-                shortName:
-                  away.shortName ||
-                  away.tla ||
-                  away.name ||
-                  "Away",
-
-                crest:
-                  away.crest ||
-                  ""
-              },
-
-              score: {
-
-                home:
-                  null,
-
-                away:
-                  null
-              }
-            };
-          }
+        })
+        .sort(
+          (a, b) =>
+            new Date(a.date) -
+            new Date(b.date)
         );
 
 
     return {
 
-      events,
+      ok: true,
 
-      count:
-        events.length,
+      from,
 
-      source:
-        "football-data.org",
+      to,
 
-      dateFrom,
+      fixtures: upcoming,
 
-      dateTo,
+      /*
+         "events" is included for compatibility with
+         older YepFootball frontend code.
+      */
 
-      message:
-        events.length
-          ? null
-          : "No fixtures returned for this period."
+      events: upcoming,
+
+      count: upcoming.length,
+
+      updated:
+        new Date().toISOString()
+
     };
+
 
   } catch (error) {
 
     return {
 
+      ok: false,
+
+      from,
+
+      to,
+
+      fixtures: [],
+
       events: [],
 
-      count:
-        0,
-
-      source:
-        "football-data.org",
+      count: 0,
 
       message:
-        `Fixtures request failed: ${String(error)}`
+        String(error?.message || error),
+
+      updated:
+        new Date().toISOString()
+
     };
+
   }
 }
 
 
-/* =====================================================
-   BBC RSS NEWS
-===================================================== */
+/* =========================================================
+   XML HELPERS FOR BBC
+========================================================= */
 
-function xmlValue(
-  xml,
-  tag
-) {
+
+/*
+   Remove CDATA completely.
+
+   Example:
+
+   <![CDATA[
+      My football story
+   ]]>
+
+   becomes:
+
+   My football story
+*/
+
+function removeCDATA(value) {
+
+  if (!value) return "";
+
+  return String(value)
+    .replace(/<!\[CDATA\[/gi, "")
+    .replace(/\]\]>/gi, "");
+}
+
+
+/*
+   Decode the most common XML/HTML entities used by BBC RSS.
+*/
+
+function decodeEntities(value) {
+
+  if (!value) return "";
+
+  let s = String(value);
+
+  /*
+     Numeric decimal entities
+     &#39;
+     &#8217;
+  */
+
+  s = s.replace(
+    /&#(\d+);/g,
+    (_, n) => {
+
+      const code =
+        Number.parseInt(n, 10);
+
+      if (
+        !Number.isFinite(code) ||
+        code < 0 ||
+        code > 0x10FFFF
+      ) {
+        return _;
+      }
+
+      return String.fromCodePoint(code);
+
+    }
+  );
+
+
+  /*
+     Numeric hexadecimal entities
+     &#x27;
+     &#x2019;
+  */
+
+  s = s.replace(
+    /&#x([0-9a-f]+);/gi,
+    (_, n) => {
+
+      const code =
+        Number.parseInt(n, 16);
+
+      if (
+        !Number.isFinite(code) ||
+        code < 0 ||
+        code > 0x10FFFF
+      ) {
+        return _;
+      }
+
+      return String.fromCodePoint(code);
+
+    }
+  );
+
+
+  const entities = {
+    "&amp;": "&",
+    "&lt;": "<",
+    "&gt;": ">",
+    "&quot;": '"',
+    "&apos;": "'",
+    "&nbsp;": " ",
+    "&ndash;": "–",
+    "&mdash;": "—",
+    "&hellip;": "…",
+    "&rsquo;": "’",
+    "&lsquo;": "‘",
+    "&rdquo;": "”",
+    "&ldquo;": "“"
+  };
+
+
+  for (const [key, value2] of Object.entries(entities)) {
+
+    s = s.replace(
+      new RegExp(key, "gi"),
+      value2
+    );
+
+  }
+
+
+  return s;
+}
+
+
+/*
+   Remove remaining HTML/XML markup from BBC descriptions.
+*/
+
+function cleanText(value) {
+
+  if (!value) return "";
+
+  let s =
+    removeCDATA(value);
+
+
+  s =
+    s.replace(
+      /<br\s*\/?>/gi,
+      " "
+    );
+
+
+  s =
+    s.replace(
+      /<\/?[^>]+>/g,
+      " "
+    );
+
+
+  s =
+    decodeEntities(s);
+
+
+  /*
+     Remove accidental CDATA/XML remnants.
+  */
+
+  s =
+    s.replace(
+      /\s+/g,
+      " "
+    )
+    .trim();
+
+
+  return s;
+}
+
+
+/*
+   Extract an XML tag.
+
+   Handles:
+
+      <title>...</title>
+
+   and:
+
+      <title><![CDATA[...]]></title>
+*/
+
+function xmlValue(xml, tag) {
 
   const regex =
     new RegExp(
-      `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
+      `<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`,
       "i"
     );
 
 
   const match =
+    xml.match(regex);
+
+
+  if (!match) return "";
+
+
+  return cleanText(match[1]);
+}
+
+
+/*
+   Extract all <item> blocks.
+*/
+
+function extractItems(xml) {
+
+  const matches =
     xml.match(
-      regex
+      /<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi
     );
 
 
-  return match
-    ? decodeHtml(
-        match[1]
-      ).trim()
-    : "";
+  return matches || [];
 }
 
 
-function parseBBCNews(
-  xml
-) {
+/* =========================================================
+   BBC NEWS PARSER
+========================================================= */
 
-  const articles = [];
+function parseNews(xml) {
 
-  const itemRegex =
-    /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
-
-  let match;
+  const items =
+    extractItems(xml);
 
 
-  while (
-    (match =
-      itemRegex.exec(
-        xml
-      )) !== null
-  ) {
+  const news = [];
 
-    const item =
-      match[1];
 
+  for (const item of items) {
 
     const title =
-      xmlValue(
-        item,
-        "title"
-      );
-
-
-    const link =
-      xmlValue(
-        item,
-        "link"
-      );
+      xmlValue(item, "title");
 
 
     const description =
-      xmlValue(
-        item,
-        "description"
-      );
+      xmlValue(item, "description");
 
 
-    const published =
-      xmlValue(
-        item,
-        "pubDate"
-      );
+    const link =
+      xmlValue(item, "link");
 
 
-    if (
-      !title ||
-      !link
-    ) {
-      continue;
-    }
+    const pubDate =
+      xmlValue(item, "pubDate");
 
 
-    articles.push({
+    /*
+       BBC RSS may use guid as well.
+    */
+
+    const guid =
+      xmlValue(item, "guid");
+
+
+    /*
+       Skip malformed items.
+    */
+
+    if (!title) continue;
+
+
+    news.push({
 
       title,
-
-      link,
 
       description,
 
-      published,
-
-      source:
-        "BBC Sport"
-    });
-  }
-
-
-  return articles.slice(
-    0,
-    12
-  );
-}
-
-
-/* =====================================================
-   BBC HTML FALLBACK
-===================================================== */
-
-function parseBBCPage(
-  html
-) {
-
-  const articles = [];
-
-  const seen =
-    new Set();
-
-
-  /*
-    Look for BBC Sport football article
-    links.
-
-    This is only a fallback if RSS
-    does not work.
-  */
-
-  const regex =
-    /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-
-  let match;
-
-
-  while (
-    (match =
-      regex.exec(html)) !== null
-  ) {
-
-    let href =
-      match[1] || "";
-
-
-    let title =
-      stripTags(
-        match[2]
-      );
-
-
-    title =
-      cleanText(
-        title
-      );
-
-
-    if (
-      !title ||
-      title.length < 15
-    ) {
-      continue;
-    }
-
-
-    /*
-      BBC article URLs.
-    */
-
-    if (
-      !href.includes(
-        "/sport/football/"
-      )
-    ) {
-      continue;
-    }
-
-
-    /*
-      Ignore generic navigation.
-    */
-
-    const lower =
-      title.toLowerCase();
-
-
-    if (
-      lower === "football" ||
-      lower === "scores & fixtures" ||
-      lower === "scores and fixtures" ||
-      lower === "tables" ||
-      lower === "results" ||
-      lower === "fixtures"
-    ) {
-      continue;
-    }
-
-
-    /*
-      Convert relative BBC URLs.
-    */
-
-    if (
-      href.startsWith("/")
-    ) {
-
-      href =
-        `https://www.bbc.com${href}`;
-    }
-
-
-    if (
-      !href.startsWith(
-        "http"
-      )
-    ) {
-      continue;
-    }
-
-
-    if (
-      seen.has(href)
-    ) {
-      continue;
-    }
-
-
-    seen.add(href);
-
-
-    articles.push({
-
-      title,
-
       link:
-        href,
-
-      description:
+        link ||
+        guid ||
         "",
 
-      published:
+      date:
+        pubDate ||
         "",
 
       source:
         "BBC Sport"
+
     });
 
-
-    if (
-      articles.length >= 12
-    ) {
-      break;
-    }
   }
 
 
-  return articles;
+  return news;
+
 }
 
 
-/* =====================================================
-   GET NEWS
-===================================================== */
+/* =========================================================
+   /api/news
+========================================================= */
 
-async function getNews() {
-
-  /*
-    FIRST:
-    BBC RSS.
-  */
+async function news() {
 
   try {
 
     const response =
-      await fetchWithTimeout(
-        BBC_RSS_URL,
+      await fetch(
+        BBC_RSS,
         {
+          method: "GET",
           headers: {
-
             "User-Agent":
-              "Mozilla/5.0 (compatible; YepFootball/1.0)",
-
+              "YepFootball/1.0",
             "Accept":
-              "application/rss+xml, application/xml, text/xml, */*",
-
-            "Accept-Language":
-              "en-GB,en;q=0.9"
+              "application/rss+xml, application/xml, text/xml"
           }
-        },
-        9000
-      );
-
-
-    if (
-      response.ok
-    ) {
-
-      const xml =
-        await response.text();
-
-
-      const articles =
-        parseBBCNews(
-          xml
-        );
-
-
-      if (
-        articles.length
-      ) {
-
-        return {
-
-          articles,
-
-          source:
-            "BBC Sport RSS",
-
-          updated:
-            nowISO(),
-
-          message:
-            null
-        };
-      }
-    }
-
-  } catch {
-    /*
-      Continue to BBC HTML.
-    */
-  }
-
-
-  /*
-    SECOND:
-    BBC Sport football page.
-  */
-
-  try {
-
-    const response =
-      await fetchWithTimeout(
-        BBC_FOOTBALL_URL,
-        {
-          headers: {
-
-            "User-Agent":
-              "Mozilla/5.0 (compatible; YepFootball/1.0)",
-
-            "Accept":
-              "text/html,application/xhtml+xml",
-
-            "Accept-Language":
-              "en-GB,en;q=0.9"
-          }
-        },
-        9000
-      );
-
-
-    if (
-      response.ok
-    ) {
-
-      const html =
-        await response.text();
-
-
-      const articles =
-        parseBBCPage(
-          html
-        );
-
-
-      if (
-        articles.length
-      ) {
-
-        return {
-
-          articles,
-
-          source:
-            "BBC Sport",
-
-          updated:
-            nowISO(),
-
-          message:
-            null
-        };
-      }
-    }
-
-  } catch {
-    /*
-      Continue to final error.
-    */
-  }
-
-
-  /*
-    Both BBC sources failed.
-  */
-
-  return {
-
-    articles: [],
-
-    source:
-      "BBC Sport",
-
-    updated:
-      nowISO(),
-
-    message:
-      "BBC Sport RSS and BBC football page were unavailable."
-  };
-}
-
-
-/* =====================================================
-   API-FOOTBALL
-   MATCH CENTRE ONLY
-===================================================== */
-
-async function getLiveMatches(
-  env
-) {
-
-  if (
-    !env.API_FOOTBALL_KEY
-  ) {
-
-    return {
-
-      events: [],
-
-      live: [],
-
-      finished: [],
-
-      upcoming: [],
-
-      count:
-        0,
-
-      liveCount:
-        0,
-
-      message:
-        "API-Football key not configured."
-    };
-  }
-
-
-  const url =
-    `${API_FOOTBALL_URL}` +
-    `/fixtures?live=` +
-    `39-2-3-848-140-135-78-61`;
-
-
-  try {
-
-    const response =
-      await fetchWithTimeout(
-        url,
-        {
-          headers: {
-
-            "x-apisports-key":
-              env.API_FOOTBALL_KEY
-          }
-        },
-        7000
+        }
       );
 
 
     if (!response.ok) {
 
       throw new Error(
-        `API-Football HTTP ${response.status}`
+        `BBC RSS returned HTTP ${response.status}`
       );
+
     }
 
 
-    const data =
-      await response.json();
+    const xml =
+      await response.text();
 
 
-    const events =
-      (data.response || [])
-        .map(
-          item => {
-
-            const fixture =
-              item.fixture ||
-              {};
-
-            const league =
-              item.league ||
-              {};
-
-            const teams =
-              item.teams ||
-              {};
-
-            const goals =
-              item.goals ||
-              {};
-
-            const status =
-              fixture.status ||
-              {};
-
-
-            return {
-
-              id:
-                fixture.id,
-
-              date:
-                fixture.date,
-
-              status:
-                status.short ||
-                "LIVE",
-
-              statusLong:
-                status.long ||
-                "",
-
-              minute:
-                status.elapsed ??
-                null,
-
-              league:
-                league.name ||
-                "Football",
-
-              leagueCode:
-                league.id != null
-                  ? String(
-                      league.id
-                    )
-                  : "",
-
-              leagueId:
-                league.id ??
-                null,
-
-              homeTeam: {
-
-                id:
-                  teams.home?.id ??
-                  null,
-
-                name:
-                  teams.home?.name ||
-                  "Home",
-
-                shortName:
-                  teams.home?.name ||
-                  "Home",
-
-                crest:
-                  teams.home?.logo ||
-                  ""
-              },
-
-              awayTeam: {
-
-                id:
-                  teams.away?.id ??
-                  null,
-
-                name:
-                  teams.away?.name ||
-                  "Away",
-
-                shortName:
-                  teams.away?.name ||
-                  "Away",
-
-                crest:
-                  teams.away?.logo ||
-                  ""
-              },
-
-              score: {
-
-                home:
-                  goals.home ??
-                  null,
-
-                away:
-                  goals.away ??
-                  null
-              }
-            };
-          }
-        );
-
-
-    const live =
-      events.filter(
-        event =>
-          [
-            "1H",
-            "2H",
-            "ET",
-            "P",
-            "LIVE",
-            "HT"
-          ].includes(
-            event.status
-          )
-      );
-
-
-    const finished =
-      events.filter(
-        event =>
-          [
-            "FT",
-            "AET",
-            "PEN"
-          ].includes(
-            event.status
-          )
-      );
-
-
-    const upcoming =
-      events.filter(
-        event =>
-          [
-            "NS",
-            "TBD"
-          ].includes(
-            event.status
-          )
-      );
+    const articles =
+      parseNews(xml);
 
 
     return {
 
-      events,
+      ok: true,
 
-      live,
+      source: "BBC Sport",
 
-      finished,
+      articles,
 
-      upcoming,
+      /*
+         Keep news as an alias in case the
+         frontend expects this name.
+      */
+
+      news: articles,
 
       count:
-        events.length,
+        articles.length,
 
-      liveCount:
-        live.length,
+      updated:
+        new Date().toISOString()
 
-      message:
-        null
     };
+
 
   } catch (error) {
 
     return {
 
-      events: [],
+      ok: false,
 
-      live: [],
+      source: "BBC Sport",
 
-      finished: [],
+      articles: [],
 
-      upcoming: [],
+      news: [],
 
-      count:
-        0,
-
-      liveCount:
-        0,
+      count: 0,
 
       message:
-        String(error)
+        String(error?.message || error),
+
+      updated:
+        new Date().toISOString()
+
     };
+
   }
+
 }
 
 
-/* =====================================================
-   HEALTH
-===================================================== */
+/* =========================================================
+   API-FOOTBALL
+   MATCH CENTRE
+========================================================= */
 
-async function health(
+async function apiFootballFetch(
+  url,
   env
 ) {
 
-  let latestScores =
-    "not configured";
+  if (!env.API_FOOTBALL_KEY) {
 
+    throw new Error(
+      "Missing Cloudflare secret API_FOOTBALL_KEY"
+    );
 
-  if (
-    env.LATEST_SCORES
-  ) {
-
-    try {
-
-      await env.LATEST_SCORES.get(
-        SCORE_KEY
-      );
-
-      latestScores =
-        "ok";
-
-    } catch {
-
-      latestScores =
-        "error";
-    }
   }
 
 
-  return {
+  const response =
+    await fetch(
+      url,
+      {
+        method: "GET",
 
-    ok:
-      true,
+        headers: {
+          "x-apisports-key":
+            env.API_FOOTBALL_KEY,
 
-    version:
-      VERSION,
+          "Accept":
+            "application/json"
+        }
+      }
+    );
 
-    checked:
-      nowISO(),
 
-    upstreams: {
+  const text =
+    await response.text();
 
-      apiFootball:
-        env.API_FOOTBALL_KEY
-          ? "configured"
-          : "missing",
 
-      footballData:
-        env.FOOTBALL_DATA_TOKEN
-          ? "configured"
-          : "missing",
+  let data;
 
-      latestScores
-    },
+  try {
+    data =
+      JSON.parse(text);
+  } catch {
+    data = {
+      response: []
+    };
+  }
 
-    dailyScoresSource:
-      "Soccerbase + football-data.org",
 
-    fixturesSource:
-      "football-data.org",
+  if (!response.ok) {
 
-    newsSource:
-      "BBC Sport RSS + BBC Sport fallback",
+    throw new Error(
+      `API-Football HTTP ${response.status}`
+    );
 
-    apiFootballUsedForLatestScores:
-      false
-  };
+  }
+
+
+  return data;
+
 }
 
 
-/* =====================================================
-   API ROUTER
-===================================================== */
+/* =========================================================
+   /api/match-centre
+========================================================= */
 
-async function handleAPI(
+async function matchCentre(
+  request,
+  env
+) {
+
+  try {
+
+    const url =
+      new URL(request.url);
+
+
+    const league =
+      url.searchParams.get("league") ||
+      "PL";
+
+
+    const date =
+      url.searchParams.get("date") ||
+      todayUTC();
+
+
+    const leagueId =
+      API_FOOTBALL_LEAGUES[
+        league.toUpperCase()
+      ];
+
+
+    if (!leagueId) {
+
+      return json(
+        {
+          ok: false,
+          message:
+            "Unknown league."
+        },
+        400
+      );
+
+    }
+
+
+    const apiUrl =
+      `${API_FOOTBALL_BASE}/fixtures` +
+      `?league=${leagueId}` +
+      `&season=2026` +
+      `&date=${encodeURIComponent(date)}`;
+
+
+    const data =
+      await apiFootballFetch(
+        apiUrl,
+        env
+      );
+
+
+    return json({
+
+      ok: true,
+
+      league,
+
+      leagueId,
+
+      date,
+
+      response:
+        Array.isArray(data.response)
+          ? data.response
+          : [],
+
+      results:
+        data.results ??
+        (
+          Array.isArray(data.response)
+            ? data.response.length
+            : 0
+        ),
+
+      errors:
+        data.errors || {},
+
+      updated:
+        new Date().toISOString()
+
+    });
+
+
+  } catch (error) {
+
+    return json(
+      {
+        ok: false,
+
+        response: [],
+
+        message:
+          String(error?.message || error),
+
+        updated:
+          new Date().toISOString()
+
+      },
+      500
+    );
+
+  }
+
+}
+
+
+/* =========================================================
+   HEALTH
+========================================================= */
+
+async function health(env) {
+
+  return {
+
+    ok: true,
+
+    service:
+      "YepFootball API",
+
+    version:
+      "2026-09-21.1",
+
+    date:
+      todayUTC(),
+
+    bindings: {
+
+      LATEST_SCORES:
+        !!env.LATEST_SCORES,
+
+      FOOTBALL_DATA_TOKEN:
+        !!env.FOOTBALL_DATA_TOKEN,
+
+      API_FOOTBALL_KEY:
+        !!env.API_FOOTBALL_KEY
+
+    },
+
+    endpoints: [
+
+      "/api/scores",
+
+      "/api/fixtures",
+
+      "/api/news",
+
+      "/api/match-centre",
+
+      "/api/health"
+
+    ],
+
+    updated:
+      new Date().toISOString()
+
+  };
+
+}
+
+
+/* =========================================================
+   MAIN REQUEST HANDLER
+========================================================= */
+
+async function handle(
   request,
   env
 ) {
@@ -2469,96 +1214,174 @@ async function handleAPI(
   const url =
     new URL(request.url);
 
+
   const path =
     url.pathname;
 
 
-  if (
-    path ===
-    "/api/health"
-  ) {
+  /*
+     CORS pre-flight
+  */
 
-    return json(
-      await health(
-        env
-      )
+  if (request.method === "OPTIONS") {
+
+    return new Response(
+      null,
+      {
+        status: 204,
+        headers: corsHeaders()
+      }
     );
+
   }
 
 
-  if (
-    path ===
-    "/api/scores"
-  ) {
-
-    const force =
-      url.searchParams.get(
-        "refresh"
-      ) === "1";
-
-
-    return json(
-      await publishYesterday(
-        env,
-        force
-      )
-    );
-  }
-
+  /*
+     Only GET is required.
+  */
 
   if (
-    path === "/api/live" ||
-    path === "/api/matches"
+    request.method !== "GET"
   ) {
 
     return json(
-      await getLiveMatches(
-        env
-      )
+      {
+        ok: false,
+        message:
+          "Method not allowed."
+      },
+      405
     );
+
   }
 
 
+  /* -----------------------------------------
+     HEALTH
+  ----------------------------------------- */
+
   if (
-    path ===
-    "/api/fixtures"
+    path === "/api/health" ||
+    path === "/api/health/"
   ) {
 
     return json(
-      await getFixtures(
-        env
-      )
+      await health(env)
     );
+
   }
 
 
+  /* -----------------------------------------
+     SCORES
+  ----------------------------------------- */
+
   if (
-    path ===
-    "/api/news"
+    path === "/api/scores" ||
+    path === "/api/scores/"
   ) {
 
     return json(
-      await getNews()
+      await latestScores(env)
     );
+
   }
 
 
-  return json(
+  /* -----------------------------------------
+     FIXTURES
+  ----------------------------------------- */
+
+  if (
+    path === "/api/fixtures" ||
+    path === "/api/fixtures/"
+  ) {
+
+    return json(
+      await fixtures(env)
+    );
+
+  }
+
+
+  /* -----------------------------------------
+     NEWS
+  ----------------------------------------- */
+
+  if (
+    path === "/api/news" ||
+    path === "/api/news/"
+  ) {
+
+    return json(
+      await news()
+    );
+
+  }
+
+
+  /* -----------------------------------------
+     MATCH CENTRE
+  ----------------------------------------- */
+
+  if (
+    path === "/api/match-centre" ||
+    path === "/api/match-centre/"
+  ) {
+
+    return matchCentre(
+      request,
+      env
+    );
+
+  }
+
+
+  /* -----------------------------------------
+     UNKNOWN API
+  ----------------------------------------- */
+
+  if (
+    path.startsWith("/api/")
+  ) {
+
+    return json(
+      {
+        ok: false,
+        message:
+          "API endpoint not found.",
+        path
+      },
+      404
+    );
+
+  }
+
+
+  /*
+     Non-API requests.
+
+     Your normal Cloudflare Pages/site frontend
+     handles the website itself.
+  */
+
+  return new Response(
+    "YepFootball API",
     {
-      ok:
-        false,
-
-      error:
-        "API endpoint not found."
-    },
-    404
+      status: 200,
+      headers: {
+        "Content-Type":
+          "text/plain; charset=utf-8"
+      }
+    }
   );
+
 }
 
 
-/* =====================================================
-   WORKER
-===================================================== */
+/* =========================================================
+   CLOUDFLARE WORKER EXPORT
+========================================================= */
 
 export default {
 
@@ -2568,42 +1391,11 @@ export default {
     ctx
   ) {
 
-    const url =
-      new URL(
-        request.url
-      );
-
-
-    if (
-      url.pathname.startsWith(
-        "/api/"
-      )
-    ) {
-
-      return handleAPI(
-        request,
-        env
-      );
-    }
-
-
-    return env.ASSETS.fetch(
-      request
+    return handle(
+      request,
+      env
     );
-  },
 
-
-  async scheduled(
-    event,
-    env,
-    ctx
-  ) {
-
-    ctx.waitUntil(
-      publishYesterday(
-        env,
-        false
-      )
-    );
   }
+
 };
