@@ -885,11 +885,17 @@ if (cached) {
     );
 
 
+  /*
+  Only cache when fixtures were actually found.
+  This prevents an empty response from being
+  cached for 30 minutes.
+*/
+if (fixturesList.length > 0) {
   await cache.put(
     cacheUrl,
     response.clone()
   );
-
+}
 
   return response;
 }
