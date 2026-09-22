@@ -1,10 +1,19 @@
 /* =========================================================
    YepFootball Cloudflare Worker
-   Version: 2026-09-22.4
+   Version: 2026-09-22.5
 
-   SCORES   -> API-Football / existing LATEST_SCORES
-   FIXTURES -> football-data.org
-   NEWS     -> BBC Sport RSS
+   SCORES:
+   Existing LATEST_SCORES / API-Football fallback
+
+   FIXTURES:
+   football-data.org via /api/fixtures-v2
+
+   NEWS:
+   BBC Sport RSS
+
+   IMPORTANT:
+   /api/fixtures-v2 is intentionally a NEW endpoint
+   to avoid the old Cloudflare /api/fixtures cache.
    ========================================================= */
 
 const API_FOOTBALL_BASE =
@@ -74,7 +83,7 @@ function corsHeaders() {
 
 
 /* =========================================================
-   JSON
+   JSON RESPONSE
    ========================================================= */
 
 function json(
@@ -82,12 +91,10 @@ function json(
   status = 200,
   extraHeaders = {}
 ) {
-
   return new Response(
     JSON.stringify(data),
     {
       status,
-
       headers: {
         "Content-Type":
           "application/json; charset=utf-8",
@@ -105,7 +112,6 @@ function json(
    ========================================================= */
 
 function todayUTC() {
-
   return new Date()
     .toISOString()
     .slice(0, 10);
@@ -116,7 +122,6 @@ function addDays(
   dateString,
   days
 ) {
-
   const d =
     new Date(
       `${dateString}T00:00:00Z`
@@ -140,21 +145,17 @@ async function apiFootball(
   path,
   env
 ) {
-
   if (!env.API_FOOTBALL_KEY) {
-
     throw new Error(
       "Missing Cloudflare secret API_FOOTBALL_KEY"
     );
   }
-
 
   const response =
     await fetch(
       `${API_FOOTBALL_BASE}${path}`,
       {
         method: "GET",
-
         headers: {
           "x-apisports-key":
             env.API_FOOTBALL_KEY,
@@ -165,19 +166,14 @@ async function apiFootball(
       }
     );
 
-
   let data = null;
 
   try {
-
     data =
       await response.json();
-
   } catch {
-
     data = null;
   }
-
 
   return {
     httpStatus:
@@ -199,14 +195,11 @@ async function footballData(
   path,
   env
 ) {
-
   if (!env.FOOTBALL_DATA_TOKEN) {
-
     throw new Error(
       "Missing Cloudflare secret FOOTBALL_DATA_TOKEN"
     );
   }
-
 
   const response =
     await fetch(
@@ -224,19 +217,14 @@ async function footballData(
       }
     );
 
-
   let data = null;
 
   try {
-
     data =
       await response.json();
-
   } catch {
-
     data = null;
   }
-
 
   return {
     httpStatus:
@@ -251,14 +239,13 @@ async function footballData(
 
 
 /* =========================================================
-   API-FOOTBALL NORMALISER
+   API-FOOTBALL FIXTURE NORMALISER
    ========================================================= */
 
 function normaliseApiFootballFixture(
   item,
   competition
 ) {
-
   const fixture =
     item?.fixture || {};
 
@@ -271,9 +258,7 @@ function normaliseApiFootballFixture(
   const goals =
     item?.goals || {};
 
-
   return {
-
     id:
       fixture.id ?? null,
 
@@ -301,7 +286,6 @@ function normaliseApiFootballFixture(
       competition.apiFootballId,
 
     homeTeam: {
-
       id:
         teams.home?.id ?? null,
 
@@ -316,7 +300,6 @@ function normaliseApiFootballFixture(
     },
 
     awayTeam: {
-
       id:
         teams.away?.id ?? null,
 
@@ -340,15 +323,13 @@ function normaliseApiFootballFixture(
 
 
 /* =========================================================
-   FOOTBALL-DATA.ORG NORMALISER
+   FOOTBALL-DATA.ORG FIXTURE NORMALISER
    ========================================================= */
 
 function normaliseFootballDataFixture(
   item
 ) {
-
   return {
-
     id:
       item.id ?? null,
 
@@ -383,7 +364,6 @@ function normaliseFootballDataFixture(
       null,
 
     homeTeam: {
-
       id:
         item.homeTeam?.id ??
         null,
@@ -403,7 +383,6 @@ function normaliseFootballDataFixture(
     },
 
     awayTeam: {
-
       id:
         item.awayTeam?.id ??
         null,
@@ -438,7 +417,6 @@ function normaliseFootballDataFixture(
    ========================================================= */
 
 async function fixtureTest(env) {
-
   try {
 
     const from =
@@ -450,12 +428,10 @@ async function fixtureTest(env) {
         9
       );
 
-
     const path =
       `/matches?competitions=PL,CL,PD,SA,BL1,FL1` +
       `&dateFrom=${from}` +
       `&dateTo=${to}`;
-
 
     const result =
       await footballData(
@@ -463,9 +439,7 @@ async function fixtureTest(env) {
         env
       );
 
-
     return json({
-
       ok:
         result.ok,
 
@@ -476,7 +450,6 @@ async function fixtureTest(env) {
         result.httpStatus,
 
       request: {
-
         competitions:
           "PL,CL,PD,SA,BL1,FL1",
 
@@ -501,13 +474,11 @@ async function fixtureTest(env) {
 
       checked:
         new Date().toISOString()
-
     });
 
   } catch (error) {
 
     return json({
-
       ok: false,
 
       source:
@@ -519,7 +490,6 @@ async function fixtureTest(env) {
 
       checked:
         new Date().toISOString()
-
     }, 500);
   }
 }
@@ -527,6 +497,7 @@ async function fixtureTest(env) {
 
 /* =========================================================
    FIXTURES
+   NEW ENDPOINT: /api/fixtures-v2
    ========================================================= */
 
 async function fixtures(
@@ -542,41 +513,56 @@ async function fixtures(
 
 
   /* -------------------------------------------------------
-     CACHE
+     NEW CACHE KEY
+
+     This deliberately does NOT use the old
+     /api/fixtures cache.
      ------------------------------------------------------- */
 
   const cacheUrl =
-  new URL(request.url);
+    new URL(request.url);
 
-cacheUrl.pathname =
-  "/api/fixtures-v20260922";
+  cacheUrl.pathname =
+    "/api/fixtures-v20260922";
 
-cacheUrl.search =
-  "";
+  cacheUrl.search =
+    "";
 
-const cache =
-  caches.default;
+  const cache =
+    caches.default;
 
-const cached =
-  await cache.match(
-    cacheUrl
-  );
 
-if (cached) {
-  return cached;
-}
+  /*
+     Only use cache if we previously found
+     actual fixtures.
+  */
+
+  const cached =
+    await cache.match(
+      cacheUrl
+    );
+
+  if (cached) {
+    return cached;
+  }
 
 
   /* -------------------------------------------------------
-     SEARCH WINDOWS
+     SEARCH UP TO 60 DAYS
 
-     football-data.org allows maximum 10 days.
+     football-data.org has a maximum date
+     range of 10 days per request.
 
-     Search 60 days ahead in 10-day blocks.
+     Therefore:
+       1. 22 Sep - 1 Oct
+       2. 2 Oct - 11 Oct
+       3. 12 Oct - 21 Oct
+       4. 22 Oct - 31 Oct
+       5. 1 Nov - 10 Nov
+       6. 11 Nov - 20 Nov
      ------------------------------------------------------- */
 
   const windows = [];
-
 
   for (
     let offset = 0;
@@ -585,7 +571,6 @@ if (cached) {
   ) {
 
     windows.push({
-
       from:
         addDays(
           today,
@@ -613,18 +598,19 @@ if (cached) {
 
   /* -------------------------------------------------------
      SEARCH WINDOWS
-
-     Stop once we have fixtures.
      ------------------------------------------------------- */
 
   for (
     const window of windows
   ) {
 
+    /*
+       Stop as soon as we find fixtures.
+    */
+
     if (
       allFixtures.length > 0
     ) {
-
       break;
     }
 
@@ -716,7 +702,7 @@ if (cached) {
 
 
   /* -------------------------------------------------------
-     SORT
+     SORT FIXTURES
      ------------------------------------------------------- */
 
   allFixtures.sort(
@@ -753,7 +739,6 @@ if (cached) {
     if (
       seen.has(key)
     ) {
-
       continue;
     }
 
@@ -767,7 +752,7 @@ if (cached) {
 
 
   /* -------------------------------------------------------
-     LIMIT
+     LIMIT TO 40 FIXTURES
      ------------------------------------------------------- */
 
   const fixturesList =
@@ -783,7 +768,6 @@ if (cached) {
 
   let mode =
     "upcoming";
-
 
   let isNextAvailable =
     false;
@@ -856,7 +840,7 @@ if (cached) {
       fixturesList,
 
     /*
-      Compatibility with existing app.js
+       Compatibility with app.js
     */
 
     events:
@@ -886,16 +870,20 @@ if (cached) {
 
 
   /*
-  Only cache when fixtures were actually found.
-  This prevents an empty response from being
-  cached for 30 minutes.
-*/
-if (fixturesList.length > 0) {
-  await cache.put(
-    cacheUrl,
-    response.clone()
-  );
-}
+     IMPORTANT:
+     Never cache an empty fixture response.
+  */
+
+  if (
+    fixturesList.length > 0
+  ) {
+
+    await cache.put(
+      cacheUrl,
+      response.clone()
+    );
+  }
+
 
   return response;
 }
@@ -911,7 +899,8 @@ async function scores(
 ) {
 
   /*
-     Keep existing cached score system.
+     Keep the existing LATEST_SCORES
+     system working.
   */
 
   if (
@@ -946,7 +935,7 @@ async function scores(
 
 
   /*
-     API-Football fallback.
+     API-Football fallback
   */
 
   try {
@@ -999,7 +988,6 @@ async function scores(
                 item?.league?.id
             ) ||
             {
-
               code:
                 String(
                   item?.league?.id ||
@@ -1114,49 +1102,39 @@ function decodeEntities(str) {
     return "";
   }
 
-
   return str
-
     .replace(
       /<!\[CDATA\[/g,
       ""
     )
-
     .replace(
       /\]\]>/g,
       ""
     )
-
     .replace(
       /&amp;/g,
       "&"
     )
-
     .replace(
       /&lt;/g,
       "<"
     )
-
     .replace(
       /&gt;/g,
       ">"
     )
-
     .replace(
       /&quot;/g,
       '"'
     )
-
     .replace(
       /&#39;/g,
       "'"
     )
-
     .replace(
       /&#x27;/g,
       "'"
     )
-
     .trim();
 }
 
@@ -1190,7 +1168,6 @@ function parseBBCNews(xml) {
   const items =
     [];
 
-
   const matches =
     xml.match(
       /<item[\s\S]*?<\/item>/gi
@@ -1207,20 +1184,17 @@ function parseBBCNews(xml) {
         "title"
       );
 
-
     const link =
       xmlValue(
         block,
         "link"
       );
 
-
     const description =
       xmlValue(
         block,
         "description"
       );
-
 
     const pubDate =
       xmlValue(
@@ -1270,7 +1244,6 @@ async function news() {
         url,
         {
           headers: {
-
             "User-Agent":
               "Mozilla/5.0 YepFootball/2026"
           }
@@ -1300,7 +1273,9 @@ async function news() {
 
 
     const articles =
-      parseBBCNews(xml);
+      parseBBCNews(
+        xml
+      );
 
 
     return json({
@@ -1352,7 +1327,7 @@ async function health(env) {
       "YepFootball API",
 
     version:
-      "2026-09-22.4",
+      "2026-09-22.5",
 
     date:
       todayUTC(),
@@ -1375,10 +1350,12 @@ async function health(env) {
     fixtureSource:
       "football-data.org",
 
+    fixtureEndpoint:
+      "/api/fixtures-v2",
+
     competitions:
       COMPETITIONS.map(
         c => ({
-
           code:
             c.code,
 
@@ -1398,6 +1375,8 @@ async function health(env) {
       "/api/scores",
 
       "/api/fixtures",
+
+      "/api/fixtures-v2",
 
       "/api/fixture-test",
 
@@ -1467,12 +1446,15 @@ export default {
     const url =
       new URL(request.url);
 
-
     const path =
       url.pathname;
 
 
     try {
+
+      /* -----------------------------------------------
+         HEALTH
+         ----------------------------------------------- */
 
       if (
         path ===
@@ -1485,6 +1467,10 @@ export default {
       }
 
 
+      /* -----------------------------------------------
+         FIXTURE TEST
+         ----------------------------------------------- */
+
       if (
         path ===
         "/api/fixture-test"
@@ -1495,6 +1481,29 @@ export default {
         );
       }
 
+
+      /* -----------------------------------------------
+         NEW FIXTURE ENDPOINT
+         ----------------------------------------------- */
+
+      if (
+        path ===
+        "/api/fixtures-v2"
+      ) {
+
+        return await fixtures(
+          request,
+          env
+        );
+      }
+
+
+      /* -----------------------------------------------
+         OLD FIXTURE ENDPOINT
+
+         Left available for compatibility,
+         but frontend will NOT use it.
+         ----------------------------------------------- */
 
       if (
         path ===
@@ -1508,6 +1517,10 @@ export default {
       }
 
 
+      /* -----------------------------------------------
+         SCORES
+         ----------------------------------------------- */
+
       if (
         path ===
         "/api/scores"
@@ -1520,6 +1533,10 @@ export default {
       }
 
 
+      /* -----------------------------------------------
+         NEWS
+         ----------------------------------------------- */
+
       if (
         path ===
         "/api/news"
@@ -1529,6 +1546,10 @@ export default {
       }
 
 
+      /* -----------------------------------------------
+         MATCH CENTRE
+         ----------------------------------------------- */
+
       if (
         path ===
         "/api/match-centre"
@@ -1537,6 +1558,10 @@ export default {
         return await matchCentre();
       }
 
+
+      /* -----------------------------------------------
+         ROOT
+         ----------------------------------------------- */
 
       return new Response(
         "YepFootball Worker OK",
