@@ -1033,4 +1033,4 @@ setInterval(
 setInterval(
   loadNews,
   30 * 60 * 1000
-);
+) ;
