@@ -276,11 +276,13 @@ function eventCard(e) {
 
   const homeScore =
     e.score?.home ??
+    e.homeScore ??
     "-";
 
 
   const awayScore =
     e.score?.away ??
+    e.awayScore ??
     "-";
 
 
@@ -487,7 +489,6 @@ async function loadScores() {
 
 /* =====================================================
    FIXTURE CARD
-   Includes team crests
 ===================================================== */
 
 function fixtureCard(e) {
@@ -532,7 +533,6 @@ function fixtureCard(e) {
 
       <div class="fixture-teams">
 
-
         <span class="fixture-team home-team">
 
           ${crestHTML(
@@ -565,7 +565,6 @@ function fixtureCard(e) {
 
         </span>
 
-
       </div>
 
 
@@ -589,10 +588,36 @@ async function loadFixtures() {
   const grid =
     $("#fixtures-grid");
 
+  const message =
+    $("#fixtures-message");
+
+  const windowLabel =
+    $("#fixtures-window");
+
 
   if (!grid) {
 
     return;
+
+  }
+
+
+  /*
+     Initial message
+  */
+
+  if (message) {
+
+    message.textContent =
+      "Checking upcoming fixtures…";
+
+  }
+
+
+  if (windowLabel) {
+
+    windowLabel.textContent =
+      "Automatic";
 
   }
 
@@ -606,22 +631,127 @@ async function loadFixtures() {
 
 
     const events =
-      data.events || [];
+      Array.isArray(data.fixtures)
+        ? data.fixtures
+        : (
+            Array.isArray(data.events)
+              ? data.events
+              : []
+          );
 
+
+    /*
+       We now expect the API to return
+       the next available fixtures even
+       when the current 7-day period is empty.
+    */
+
+    if (events.length) {
+
+      grid.innerHTML =
+        events
+          .map(fixtureCard)
+          .join("");
+
+
+      if (message) {
+
+        if (
+          data.isNextAvailable ||
+          data.mode === "next"
+        ) {
+
+          message.textContent =
+            "No fixtures during the current period. Showing the next available matches.";
+
+        }
+
+        else {
+
+          message.textContent =
+            "Upcoming European fixtures.";
+
+        }
+
+      }
+
+
+      if (windowLabel) {
+
+        if (
+          data.from &&
+          data.to
+        ) {
+
+          const from =
+            new Date(
+              `${data.from}T12:00:00`
+            );
+
+
+          const to =
+            new Date(
+              `${data.to}T12:00:00`
+            );
+
+
+          windowLabel.textContent =
+            `${from.toLocaleDateString(
+              undefined,
+              {
+                day: "numeric",
+                month: "short"
+              }
+            )} – ${to.toLocaleDateString(
+              undefined,
+              {
+                day: "numeric",
+                month: "short"
+              }
+            )}`;
+
+        }
+
+        else {
+
+          windowLabel.textContent =
+            "Next available";
+
+        }
+
+      }
+
+      return;
+
+    }
+
+
+    /*
+       No fixtures returned at all.
+    */
 
     grid.innerHTML =
+      `
+        <div class="empty">
+          No upcoming European fixtures are currently available.
+        </div>
+      `;
 
-      events.length
 
-        ? events
-            .map(fixtureCard)
-            .join("")
+    if (message) {
 
-        : `
-          <div class="empty">
-            No upcoming fixtures found.
-          </div>
-        `;
+      message.textContent =
+        "The next fixture information is not currently available.";
+
+    }
+
+
+    if (windowLabel) {
+
+      windowLabel.textContent =
+        "Automatic";
+
+    }
 
   }
 
@@ -639,6 +769,22 @@ async function loadFixtures() {
           Fixtures are temporarily unavailable.
         </div>
       `;
+
+
+    if (message) {
+
+      message.textContent =
+        "Unable to load the fixture feed.";
+
+    }
+
+
+    if (windowLabel) {
+
+      windowLabel.textContent =
+        "Feed unavailable";
+
+    }
 
   }
 
@@ -722,10 +868,12 @@ function newsCard(article) {
         <span class="source">
 
           ${
-            article.published
+            article.published ||
+            article.date
               ? esc(
                   fmtNewsDate(
-                    article.published
+                    article.published ||
+                    article.date
                   )
                 )
               : "Latest"
