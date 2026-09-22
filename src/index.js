@@ -1,21 +1,19 @@
 /* =========================================================
    YepFootball Cloudflare Worker
-   Version: 2026-09-21.1
+   Version: 2026-09-22.1
 
-   ARCHITECTURE
+   API ENDPOINTS
 
    /api/scores
       -> LATEST_SCORES KV
-      -> Existing scores snapshot preserved
 
    /api/fixtures
-      -> football-data.org v4
-      -> Upcoming fixtures
-      -> PL, CL, PD, SA, BL1, FL1
+      -> API-Football
+      -> Automatically finds NEXT available fixtures
+      -> No problem during international breaks
 
    /api/news
-      -> BBC Sport Football RSS
-      -> CDATA cleaned
+      -> BBC Sport RSS
 
    /api/match-centre
       -> API-Football
@@ -39,29 +37,52 @@ const BBC_RSS =
   "https://feeds.bbci.co.uk/sport/football/rss.xml";
 
 
-/*
-   Football-data.org competitions
-*/
+/* =========================================================
+   COMPETITIONS
+========================================================= */
+
 const COMPETITIONS = {
-  PL: "Premier League",
-  CL: "UEFA Champions League",
-  PD: "La Liga",
-  SA: "Serie A",
-  BL1: "Bundesliga",
-  FL1: "Ligue 1"
-};
 
+  PL: {
+    name: "Premier League",
+    id: 39
+  },
 
-/*
-   API-Football competition IDs
-*/
-const API_FOOTBALL_LEAGUES = {
-  PL: 39,
-  CL: 2,
-  PD: 140,
-  SA: 135,
-  BL1: 78,
-  FL1: 61
+  CL: {
+    name: "Champions League",
+    id: 2
+  },
+
+  EL: {
+    name: "Europa League",
+    id: 3
+  },
+
+  ECL: {
+    name: "Conference League",
+    id: 848
+  },
+
+  PD: {
+    name: "La Liga",
+    id: 140
+  },
+
+  SA: {
+    name: "Serie A",
+    id: 135
+  },
+
+  BL1: {
+    name: "Bundesliga",
+    id: 78
+  },
+
+  FL1: {
+    name: "Ligue 1",
+    id: 61
+  }
+
 };
 
 
@@ -70,26 +91,51 @@ const API_FOOTBALL_LEAGUES = {
 ========================================================= */
 
 function corsHeaders() {
+
   return {
+
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Cache-Control": "no-store"
+
+    "Access-Control-Allow-Methods":
+      "GET, OPTIONS",
+
+    "Access-Control-Allow-Headers":
+      "Content-Type",
+
+    "Cache-Control":
+      "no-store"
+
   };
+
 }
 
 
-function json(data, status = 200) {
+function json(
+  data,
+  status = 200
+) {
+
   return new Response(
+
     JSON.stringify(data),
+
     {
+
       status,
+
       headers: {
+
         ...corsHeaders(),
-        "Content-Type": "application/json; charset=utf-8"
+
+        "Content-Type":
+          "application/json; charset=utf-8"
+
       }
+
     }
+
   );
+
 }
 
 
@@ -97,529 +143,824 @@ function json(data, status = 200) {
    DATE HELPERS
 ========================================================= */
 
-function isoDate(date) {
-  return date.toISOString().slice(0, 10);
-}
-
-
 function todayUTC() {
-  return isoDate(new Date());
+
+  return new Date()
+    .toISOString()
+    .slice(0, 10);
+
 }
 
 
-function addDays(dateString, days) {
-  const d = new Date(`${dateString}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return isoDate(d);
+function addDays(
+  dateString,
+  days
+) {
+
+  const d =
+    new Date(
+      `${dateString}T12:00:00Z`
+    );
+
+  d.setUTCDate(
+    d.getUTCDate() + days
+  );
+
+  return d
+    .toISOString()
+    .slice(0, 10);
+
 }
 
 
 /* =========================================================
-   /api/scores
-   ---------------------------------------------------------
-   IMPORTANT:
-   This keeps the existing LATEST_SCORES architecture.
-
-   The frontend expects:
-
-      events
-      live
-      finished
-      upcoming
-      count
-      liveCount
-      message
-      updated
+   SCORES
 ========================================================= */
 
 async function latestScores(env) {
 
   if (!env.LATEST_SCORES) {
+
     return {
+
       events: [],
+
       live: [],
+
       finished: [],
+
       upcoming: [],
+
       count: 0,
+
       liveCount: 0,
-      message: "LATEST_SCORES KV binding is missing.",
-      updated: new Date().toISOString()
+
+      message:
+        "LATEST_SCORES KV binding is missing.",
+
+      updated:
+        new Date().toISOString()
+
     };
+
   }
 
 
-  /*
-     The existing snapshot is stored under "latest".
-  */
-
   let raw = null;
 
+
   try {
-    raw = await env.LATEST_SCORES.get("latest");
-  } catch (error) {
+
+    raw =
+      await env.LATEST_SCORES.get(
+        "latest"
+      );
+
+  }
+
+  catch (error) {
+
     return {
+
       events: [],
+
       live: [],
+
       finished: [],
+
       upcoming: [],
+
       count: 0,
+
       liveCount: 0,
-      message: "Unable to read LATEST_SCORES.",
-      error: String(error),
-      updated: new Date().toISOString()
+
+      message:
+        "Unable to read LATEST_SCORES.",
+
+      error:
+        String(error),
+
+      updated:
+        new Date().toISOString()
+
     };
+
   }
 
 
   if (!raw) {
+
     return {
+
       events: [],
+
       live: [],
+
       finished: [],
+
       upcoming: [],
+
       count: 0,
+
       liveCount: 0,
-      message: "No scores snapshot available yet.",
-      updated: new Date().toISOString()
+
+      message:
+        "No scores snapshot available yet.",
+
+      updated:
+        new Date().toISOString()
+
     };
+
   }
 
 
   try {
 
-    const data = JSON.parse(raw);
+    const data =
+      JSON.parse(raw);
 
-    /*
-       If the stored snapshot already has the expected
-       structure, return it essentially unchanged.
-    */
 
     if (
+
       data &&
-      Array.isArray(data.events) &&
-      Array.isArray(data.live) &&
-      Array.isArray(data.finished) &&
-      Array.isArray(data.upcoming)
+
+      Array.isArray(
+        data.events
+      ) &&
+
+      Array.isArray(
+        data.live
+      ) &&
+
+      Array.isArray(
+        data.finished
+      ) &&
+
+      Array.isArray(
+        data.upcoming
+      )
+
     ) {
 
       return {
-        ...data,
-        count: Number.isFinite(data.count)
-          ? data.count
-          : data.events.length,
 
-        liveCount: Number.isFinite(data.liveCount)
-          ? data.liveCount
-          : data.live.length,
+        ...data,
+
+        count:
+          Number.isFinite(
+            data.count
+          )
+            ? data.count
+            : data.events.length,
+
+        liveCount:
+          Number.isFinite(
+            data.liveCount
+          )
+            ? data.liveCount
+            : data.live.length,
 
         updated:
           data.updated ||
           new Date().toISOString()
+
       };
+
     }
 
 
-    /*
-       If the KV contains only an events array,
-       rebuild the categories.
-    */
-
     const events =
+
       Array.isArray(data)
+
         ? data
-        : Array.isArray(data.events)
+
+        : Array.isArray(
+            data.events
+          )
+
           ? data.events
+
           : [];
 
 
     const live = [];
+
     const finished = [];
+
     const upcoming = [];
 
 
-    for (const event of events) {
+    for (
+      const event of events
+    ) {
 
       const status =
+
         String(
+
           event.status ||
+
           event.statusShort ||
+
           ""
+
         ).toUpperCase();
 
 
       if (
+
         status === "LIVE" ||
+
         status === "IN_PLAY" ||
+
         status === "PAUSED" ||
+
         status === "1H" ||
+
         status === "2H" ||
+
         status === "HT"
+
       ) {
 
         live.push(event);
 
-      } else if (
+      }
+
+      else if (
+
         status === "FINISHED" ||
+
         status === "FT" ||
+
         status === "AET" ||
+
         status === "PEN" ||
-        status === "AWARDED" ||
-        status === "POSTPONED" ||
-        status === "CANCELLED" ||
-        status === "SUSPENDED"
+
+        status === "AWARDED"
+
       ) {
 
         finished.push(event);
 
-      } else {
+      }
+
+      else {
 
         upcoming.push(event);
 
       }
+
     }
 
 
     return {
+
       events,
+
       live,
+
       finished,
+
       upcoming,
-      count: events.length,
-      liveCount: live.length,
+
+      count:
+        events.length,
+
+      liveCount:
+        live.length,
+
       message:
         events.length
           ? ""
           : "No matches scheduled today.",
+
       updated:
         data.updated ||
         new Date().toISOString()
+
     };
 
-  } catch (error) {
+  }
+
+  catch (error) {
 
     return {
+
       events: [],
+
       live: [],
+
       finished: [],
+
       upcoming: [],
+
       count: 0,
+
       liveCount: 0,
-      message: "Invalid scores snapshot.",
-      error: String(error),
-      updated: new Date().toISOString()
+
+      message:
+        "Invalid scores snapshot.",
+
+      error:
+        String(error),
+
+      updated:
+        new Date().toISOString()
+
     };
+
   }
+
 }
 
 
 /* =========================================================
-   FOOTBALL-DATA.ORG REQUEST
+   API-FOOTBALL REQUEST
 ========================================================= */
 
-async function footballDataFetch(url, env) {
-
-  if (!env.FOOTBALL_DATA_TOKEN) {
-    throw new Error(
-      "Missing Cloudflare secret FOOTBALL_DATA_TOKEN"
-    );
-  }
-
-
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      "X-Auth-Token": env.FOOTBALL_DATA_TOKEN,
-      "Accept": "application/json"
-    }
-  });
-
-
-  const text = await response.text();
-
-
-  let data;
-
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = {
-      error: text
-    };
-  }
-
-
-  if (!response.ok) {
-
-    const message =
-      data?.message ||
-      data?.error ||
-      `football-data.org returned HTTP ${response.status}`;
-
-    throw new Error(message);
-  }
-
-
-  return data;
-}
-
-
-/* =========================================================
-   /api/fixtures
-   ---------------------------------------------------------
-   Upcoming fixtures:
-
-   Today -> next 30 days
-
-   Competitions:
-      PL
-      CL
-      PD
-      SA
-      BL1
-      FL1
-========================================================= */
-
-async function fixtures(env) {
-
-  const from = todayUTC();
-  const to = addDays(from, 7);
-
-  const leagues = [
-    {
-      code: "PL",
-      name: "Premier League",
-      id: 39
-    },
-    {
-      code: "CL",
-      name: "Champions League",
-      id: 2
-    },
-    {
-      code: "PD",
-      name: "La Liga",
-      id: 140
-    },
-    {
-      code: "SA",
-      name: "Serie A",
-      id: 135
-    },
-    {
-      code: "BL1",
-      name: "Bundesliga",
-      id: 78
-    },
-    {
-      code: "FL1",
-      name: "Ligue 1",
-      id: 61
-    }
-  ];
+async function apiFootballFetch(
+  url,
+  env
+) {
 
   if (!env.API_FOOTBALL_KEY) {
-    return {
-      ok: false,
-      from,
-      to,
-      fixtures: [],
-      events: [],
-      count: 0,
-      message: "Missing Cloudflare secret API_FOOTBALL_KEY",
-      updated: new Date().toISOString()
-    };
+
+    throw new Error(
+      "Missing Cloudflare secret API_FOOTBALL_KEY"
+    );
+
   }
 
-  const diagnostics = [];
 
-  const requests = leagues.map(async (league) => {
+  const response =
+    await fetch(
 
-    const url =
-      `${API_FOOTBALL_BASE}/fixtures` +
-      `?league=${league.id}` +
-      `&season=2026` +
-      `&from=${from}` +
-      `&to=${to}`;
+      url,
 
-    try {
+      {
 
-      const response = await fetch(url, {
         method: "GET",
+
         headers: {
+
           "x-apisports-key":
             env.API_FOOTBALL_KEY,
 
           "Accept":
             "application/json"
+
         }
-      });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-
-        diagnostics.push({
-          competition: league.code,
-          returned: 0,
-          httpStatus: response.status,
-          error:
-            data?.errors ||
-            `HTTP ${response.status}`
-        });
-
-        return [];
       }
 
-      const matches =
-        Array.isArray(data.response)
-          ? data.response
-          : [];
+    );
 
-      diagnostics.push({
-        competition: league.code,
-        returned: matches.length,
-        apiResults:
-          data.results ?? matches.length
-      });
 
-      return matches.map(match => {
+  const text =
+    await response.text();
 
-        const fixture =
-          match.fixture || {};
 
-        const teams =
-          match.teams || {};
+  let data;
 
-        const leagueData =
-          match.league || {};
 
-        const goals =
-          match.goals || {};
+  try {
 
-        return {
+    data =
+      JSON.parse(text);
 
-          id:
-            fixture.id ?? null,
+  }
 
-          date:
-            fixture.date || "",
+  catch {
 
-          status:
-            fixture.status?.short ||
-            fixture.status?.long ||
-            "",
+    data = {
 
-          statusLong:
-            fixture.status?.long ||
-            "",
+      response: [],
 
-          minute:
-            fixture.status?.elapsed ??
-            null,
+      errors: {
 
-          league:
-            league.name,
+        parse:
+          "Invalid JSON response"
 
-          leagueCode:
-            league.code,
+      }
 
-          leagueId:
-            league.id,
+    };
 
-          homeTeam: {
+  }
 
-            id:
-              teams.home?.id ??
-              null,
 
-            name:
-              teams.home?.name ||
-              "",
+  if (!response.ok) {
 
-            shortName:
-              teams.home?.name ||
-              "",
+    throw new Error(
 
-            crest:
-              teams.home?.logo ||
-              ""
+      `API-Football HTTP ${response.status}: ` +
 
-          },
+      JSON.stringify(
+        data?.errors || {}
+      )
 
-          awayTeam: {
+    );
 
-            id:
-              teams.away?.id ??
-              null,
+  }
 
-            name:
-              teams.away?.name ||
-              "",
 
-            shortName:
-              teams.away?.name ||
-              "",
+  return data;
 
-            crest:
-              teams.away?.logo ||
-              ""
+}
 
-          },
 
-          homeScore:
-            goals.home ??
-            null,
+/* =========================================================
+   API-FOOTBALL FIXTURE CONVERSION
+========================================================= */
 
-          awayScore:
-            goals.away ??
-            null,
+function convertFixture(
+  match,
+  competition
+) {
 
-          venue:
-            fixture.venue?.name ||
-            "",
+  const fixture =
+    match.fixture || {};
 
-          city:
-            fixture.venue?.city ||
-            "",
+  const teams =
+    match.teams || {};
 
-          referee:
-            fixture.referee ||
-            "",
+  const league =
+    match.league || {};
 
-          timestamp:
-            fixture.timestamp ??
-            null
+  const goals =
+    match.goals || {};
 
-        };
 
-      });
+  return {
 
-    } catch (error) {
+    id:
+      fixture.id ??
+      null,
 
-      diagnostics.push({
+    date:
+      fixture.date ||
+      "",
 
-        competition:
-          league.code,
+    status:
+      fixture.status?.short ||
+      fixture.status?.long ||
+      "",
 
-        returned:
-          0,
+    statusLong:
+      fixture.status?.long ||
+      "",
 
-        error:
-          String(
-            error?.message ||
-            error
-          )
+    minute:
+      fixture.status?.elapsed ??
+      null,
 
-      });
+    league:
+      competition.name,
 
-      return [];
+    leagueCode:
+      competition.code,
+
+    leagueId:
+      competition.id,
+
+    homeTeam: {
+
+      id:
+        teams.home?.id ??
+        null,
+
+      name:
+        teams.home?.name ||
+        "",
+
+      shortName:
+        teams.home?.name ||
+        "",
+
+      crest:
+        teams.home?.logo ||
+        ""
+
+    },
+
+    awayTeam: {
+
+      id:
+        teams.away?.id ??
+        null,
+
+      name:
+        teams.away?.name ||
+        "",
+
+      shortName:
+        teams.away?.name ||
+        "",
+
+      crest:
+        teams.away?.logo ||
+        ""
+
+    },
+
+    homeScore:
+      goals.home ??
+      null,
+
+    awayScore:
+      goals.away ??
+      null,
+
+    venue:
+      fixture.venue?.name ||
+      "",
+
+    city:
+      fixture.venue?.city ||
+      "",
+
+    referee:
+      fixture.referee ||
+      "",
+
+    timestamp:
+      fixture.timestamp ??
+      null
+
+  };
+
+}
+
+
+/* =========================================================
+   FIXTURE CACHE
+   ---------------------------------------------------------
+   We cache the complete fixture response for 30 minutes.
+
+   This is important because your API-Football plan has a
+   daily request limit.
+
+   The frontend refreshes every 15 minutes, but the Worker
+   only goes back to API-Football approximately every
+   30 minutes.
+========================================================= */
+
+const FIXTURE_CACHE_SECONDS =
+  1800;
+
+
+/* =========================================================
+   /api/fixtures
+   ---------------------------------------------------------
+   IMPORTANT:
+
+   We use API-Football "next" instead of a fixed date range.
+
+   This means:
+
+   21-28 September -> no matches
+   ↓
+   API automatically finds
+   the next available matches
+   ↓
+   October fixtures appear
+
+   This works through international breaks.
+========================================================= */
+
+async function fixtures(
+  request,
+  env
+) {
+
+  const cache =
+    caches.default;
+
+
+  /*
+     Cache key is based on the endpoint.
+  */
+
+  const cacheUrl =
+    new URL(
+      request.url
+    );
+
+
+  cacheUrl.search =
+    "";
+
+
+  const cacheRequest =
+    new Request(
+      cacheUrl.toString(),
+      {
+        method: "GET"
+      }
+    );
+
+
+  /*
+     Try Cloudflare edge cache first.
+  */
+
+  const cached =
+    await cache.match(
+      cacheRequest
+    );
+
+
+  if (cached) {
+
+    const cachedText =
+      await cached.text();
+
+
+    try {
+
+      const cachedData =
+        JSON.parse(
+          cachedText
+        );
+
+
+      return json(
+        cachedData
+      );
+
     }
 
-  });
+    catch {
+
+      /*
+         Ignore bad cache and continue.
+      */
+
+    }
+
+  }
+
+
+  const competitions = [
+
+    {
+      code: "PL",
+      name: "Premier League",
+      id: 39
+    },
+
+    {
+      code: "CL",
+      name: "Champions League",
+      id: 2
+    },
+
+    {
+      code: "EL",
+      name: "Europa League",
+      id: 3
+    },
+
+    {
+      code: "ECL",
+      name: "Conference League",
+      id: 848
+    },
+
+    {
+      code: "PD",
+      name: "La Liga",
+      id: 140
+    },
+
+    {
+      code: "SA",
+      name: "Serie A",
+      id: 135
+    },
+
+    {
+      code: "BL1",
+      name: "Bundesliga",
+      id: 78
+    },
+
+    {
+      code: "FL1",
+      name: "Ligue 1",
+      id: 61
+    }
+
+  ];
+
+
+  const diagnostics = [];
+
+
+  /*
+     Query all competitions.
+
+     "next=5" means API-Football returns the next
+     available matches rather than only today's
+     or the next seven days.
+
+     Therefore an international break is no problem.
+  */
+
+  const requests =
+    competitions.map(
+      async competition => {
+
+        const url =
+
+          `${API_FOOTBALL_BASE}/fixtures` +
+
+          `?league=${competition.id}` +
+
+          `&season=2026` +
+
+          `&next=5`;
+
+
+        try {
+
+          const data =
+            await apiFootballFetch(
+              url,
+              env
+            );
+
+
+          const matches =
+
+            Array.isArray(
+              data.response
+            )
+
+              ? data.response
+
+              : [];
+
+
+          diagnostics.push({
+
+            competition:
+              competition.code,
+
+            returned:
+              matches.length,
+
+            apiResults:
+              data.results ??
+              matches.length
+
+          });
+
+
+          return matches.map(
+            match =>
+              convertFixture(
+                match,
+                competition
+              )
+          );
+
+        }
+
+        catch (error) {
+
+          diagnostics.push({
+
+            competition:
+              competition.code,
+
+            returned:
+              0,
+
+            error:
+              String(
+                error?.message ||
+                error
+              )
+
+          });
+
+
+          return [];
+
+        }
+
+      }
+
+    );
 
 
   const results =
-    await Promise.all(requests);
+    await Promise.all(
+      requests
+    );
 
 
   const allFixtures =
@@ -627,33 +968,44 @@ async function fixtures(env) {
 
 
   /*
-     Keep only future fixtures.
-     We don't want completed matches
-     appearing in the Fixtures page.
+     Keep only genuinely upcoming matches.
   */
 
-  const upcoming =
-    allFixtures
-      .filter(fixture => {
+  const now =
+    Date.now();
 
-        if (!fixture.date) {
-          return false;
+
+  const upcoming =
+
+    allFixtures
+
+      .filter(
+        fixture => {
+
+          if (!fixture.date) {
+
+            return false;
+
+          }
+
+
+          const time =
+            new Date(
+              fixture.date
+            ).getTime();
+
+
+          return (
+
+            Number.isFinite(time) &&
+
+            time >=
+              now - 60 * 1000
+
+          );
+
         }
 
-        const date =
-          new Date(fixture.date);
-
-        return (
-          !Number.isNaN(date.getTime()) &&
-          date.getTime() >=
-            Date.now() - 60 * 1000
-        );
-
-      })
-      .sort(
-        (a, b) =>
-          new Date(a.date) -
-          new Date(b.date)
       );
 
 
@@ -662,28 +1014,135 @@ async function fixtures(env) {
   */
 
   const unique =
+
     Array.from(
+
       new Map(
+
         upcoming.map(
           fixture => [
             fixture.id,
             fixture
           ]
         )
+
       ).values()
+
     );
 
 
-  return {
+  /*
+     Sort by date.
+  */
+
+  unique.sort(
+
+    (a, b) =>
+
+      new Date(a.date) -
+      new Date(b.date)
+
+  );
+
+
+  /*
+     Work out the date of the first fixture.
+  */
+
+  let firstFixtureDate =
+    null;
+
+
+  if (unique.length) {
+
+    firstFixtureDate =
+      unique[0].date;
+
+  }
+
+
+  /*
+     Determine whether we are showing fixtures
+     outside the current seven-day period.
+
+     This is useful to the frontend so it can say:
+
+     "No fixtures during the current period.
+      Showing the next available matches."
+  */
+
+  const today =
+    todayUTC();
+
+
+  const sevenDays =
+    addDays(
+      today,
+      7
+    );
+
+
+  let isNextAvailable =
+    false;
+
+
+  if (firstFixtureDate) {
+
+    const firstDate =
+      new Date(
+        firstFixtureDate
+      );
+
+
+    const sevenDayEnd =
+      new Date(
+        `${sevenDays}T23:59:59Z`
+      );
+
+
+    isNextAvailable =
+      firstDate >
+      sevenDayEnd;
+
+  }
+
+
+  const result = {
 
     ok: true,
 
     source:
       "API-Football",
 
-    from,
+    /*
+       These indicate the actual fixtures returned,
+       not the old fixed 7-day search.
+    */
 
-    to,
+    from:
+      firstFixtureDate
+        ? firstFixtureDate.slice(
+            0,
+            10
+          )
+        : today,
+
+    to:
+      firstFixtureDate
+        ? unique[
+            unique.length - 1
+          ].date.slice(
+            0,
+            10
+          )
+        : sevenDays,
+
+    mode:
+      isNextAvailable
+        ? "next"
+        : "upcoming",
+
+    isNextAvailable,
 
     fixtures:
       unique,
@@ -701,141 +1160,272 @@ async function fixtures(env) {
 
   };
 
-}
-/* =========================================================
-   XML HELPERS FOR BBC
-========================================================= */
-
-
-/*
-   Remove CDATA completely.
-
-   Example:
-
-   <![CDATA[
-      My football story
-   ]]>
-
-   becomes:
-
-   My football story
-*/
-
-function removeCDATA(value) {
-
-  if (!value) return "";
-
-  return String(value)
-    .replace(/<!\[CDATA\[/gi, "")
-    .replace(/\]\]>/gi, "");
-}
-
-
-/*
-   Decode the most common XML/HTML entities used by BBC RSS.
-*/
-
-function decodeEntities(value) {
-
-  if (!value) return "";
-
-  let s = String(value);
 
   /*
-     Numeric decimal entities
-     &#39;
-     &#8217;
+     Store in Cloudflare edge cache.
+
+     30 minutes.
+
+     This prevents every frontend refresh from consuming
+     API-Football quota.
   */
 
-  s = s.replace(
-    /&#(\d+);/g,
-    (_, n) => {
+  try {
 
-      const code =
-        Number.parseInt(n, 10);
+    const cacheResponse =
+      new Response(
 
-      if (
-        !Number.isFinite(code) ||
-        code < 0 ||
-        code > 0x10FFFF
-      ) {
-        return _;
-      }
+        JSON.stringify(
+          result
+        ),
 
-      return String.fromCodePoint(code);
+        {
 
-    }
-  );
+          status: 200,
 
+          headers: {
 
-  /*
-     Numeric hexadecimal entities
-     &#x27;
-     &#x2019;
-  */
+            "Content-Type":
+              "application/json; charset=utf-8",
 
-  s = s.replace(
-    /&#x([0-9a-f]+);/gi,
-    (_, n) => {
+            "Cache-Control":
+              `public, max-age=${FIXTURE_CACHE_SECONDS}`
 
-      const code =
-        Number.parseInt(n, 16);
+          }
 
-      if (
-        !Number.isFinite(code) ||
-        code < 0 ||
-        code > 0x10FFFF
-      ) {
-        return _;
-      }
+        }
 
-      return String.fromCodePoint(code);
-
-    }
-  );
+      );
 
 
-  const entities = {
-    "&amp;": "&",
-    "&lt;": "<",
-    "&gt;": ">",
-    "&quot;": '"',
-    "&apos;": "'",
-    "&nbsp;": " ",
-    "&ndash;": "–",
-    "&mdash;": "—",
-    "&hellip;": "…",
-    "&rsquo;": "’",
-    "&lsquo;": "‘",
-    "&rdquo;": "”",
-    "&ldquo;": "“"
-  };
+    await cache.put(
+      cacheRequest,
+      cacheResponse
+    );
 
+  }
 
-  for (const [key, value2] of Object.entries(entities)) {
+  catch (error) {
 
-    s = s.replace(
-      new RegExp(key, "gi"),
-      value2
+    /*
+       Cache failure must never break
+       the actual API response.
+    */
+
+    console.error(
+      "Fixture cache error:",
+      error
     );
 
   }
 
 
-  return s;
+  return json(
+    result
+  );
+
 }
 
 
-/*
-   Remove remaining HTML/XML markup from BBC descriptions.
-*/
+/* =========================================================
+   BBC XML HELPERS
+========================================================= */
 
-function cleanText(value) {
+function removeCDATA(
+  value
+) {
 
-  if (!value) return "";
+  if (!value) {
+
+    return "";
+
+  }
+
+
+  return String(value)
+
+    .replace(
+      /<!\[CDATA\[/gi,
+      ""
+    )
+
+    .replace(
+      /\]\]>/gi,
+      ""
+    );
+
+}
+
+
+function decodeEntities(
+  value
+) {
+
+  if (!value) {
+
+    return "";
+
+  }
+
 
   let s =
-    removeCDATA(value);
+    String(value);
+
+
+  /*
+     Decimal entities
+  */
+
+  s =
+    s.replace(
+      /&#(\d+);/g,
+      (_, n) => {
+
+        const code =
+          Number.parseInt(
+            n,
+            10
+          );
+
+
+        if (
+
+          !Number.isFinite(
+            code
+          ) ||
+
+          code < 0 ||
+
+          code >
+            0x10FFFF
+
+        ) {
+
+          return _;
+
+        }
+
+
+        return String.fromCodePoint(
+          code
+        );
+
+      }
+    );
+
+
+  /*
+     Hex entities
+  */
+
+  s =
+    s.replace(
+      /&#x([0-9a-f]+);/gi,
+      (_, n) => {
+
+        const code =
+          Number.parseInt(
+            n,
+            16
+          );
+
+
+        if (
+
+          !Number.isFinite(
+            code
+          ) ||
+
+          code < 0 ||
+
+          code >
+            0x10FFFF
+
+        ) {
+
+          return _;
+
+        }
+
+
+        return String.fromCodePoint(
+          code
+        );
+
+      }
+    );
+
+
+  const entities = {
+
+    "&amp;": "&",
+
+    "&lt;": "<",
+
+    "&gt;": ">",
+
+    "&quot;": '"',
+
+    "&apos;": "'",
+
+    "&nbsp;": " ",
+
+    "&ndash;": "–",
+
+    "&mdash;": "—",
+
+    "&hellip;": "…",
+
+    "&rsquo;": "’",
+
+    "&lsquo;": "‘",
+
+    "&rdquo;": "”",
+
+    "&ldquo;": "“"
+
+  };
+
+
+  for (
+    const [key, value2]
+    of Object.entries(
+      entities
+    )
+  ) {
+
+    s =
+      s.replace(
+        new RegExp(
+          key,
+          "gi"
+        ),
+        value2
+      );
+
+  }
+
+
+  return s;
+
+}
+
+
+function cleanText(
+  value
+) {
+
+  if (!value) {
+
+    return "";
+
+  }
+
+
+  let s =
+    removeCDATA(
+      value
+    );
 
 
   s =
@@ -853,12 +1443,10 @@ function cleanText(value) {
 
 
   s =
-    decodeEntities(s);
+    decodeEntities(
+      s
+    );
 
-
-  /*
-     Remove accidental CDATA/XML remnants.
-  */
 
   s =
     s.replace(
@@ -869,46 +1457,48 @@ function cleanText(value) {
 
 
   return s;
+
 }
 
 
-/*
-   Extract an XML tag.
-
-   Handles:
-
-      <title>...</title>
-
-   and:
-
-      <title><![CDATA[...]]></title>
-*/
-
-function xmlValue(xml, tag) {
+function xmlValue(
+  xml,
+  tag
+) {
 
   const regex =
     new RegExp(
+
       `<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`,
+
       "i"
+
     );
 
 
   const match =
-    xml.match(regex);
+    xml.match(
+      regex
+    );
 
 
-  if (!match) return "";
+  if (!match) {
+
+    return "";
+
+  }
 
 
-  return cleanText(match[1]);
+  return cleanText(
+    match[1]
+  );
+
 }
 
 
-/*
-   Extract all <item> blocks.
-*/
-
-function extractItems(xml) {
+function extractItems(
+  xml
+) {
 
   const matches =
     xml.match(
@@ -917,6 +1507,7 @@ function extractItems(xml) {
 
 
   return matches || [];
+
 }
 
 
@@ -924,46 +1515,64 @@ function extractItems(xml) {
    BBC NEWS PARSER
 ========================================================= */
 
-function parseNews(xml) {
+function parseNews(
+  xml
+) {
 
   const items =
-    extractItems(xml);
+    extractItems(
+      xml
+    );
 
 
   const news = [];
 
 
-  for (const item of items) {
+  for (
+    const item
+    of items
+  ) {
 
     const title =
-      xmlValue(item, "title");
+      xmlValue(
+        item,
+        "title"
+      );
 
 
     const description =
-      xmlValue(item, "description");
+      xmlValue(
+        item,
+        "description"
+      );
 
 
     const link =
-      xmlValue(item, "link");
+      xmlValue(
+        item,
+        "link"
+      );
 
 
     const pubDate =
-      xmlValue(item, "pubDate");
+      xmlValue(
+        item,
+        "pubDate"
+      );
 
-
-    /*
-       BBC RSS may use guid as well.
-    */
 
     const guid =
-      xmlValue(item, "guid");
+      xmlValue(
+        item,
+        "guid"
+      );
 
 
-    /*
-       Skip malformed items.
-    */
+    if (!title) {
 
-    if (!title) continue;
+      continue;
+
+    }
 
 
     news.push({
@@ -978,6 +1587,10 @@ function parseNews(xml) {
         "",
 
       date:
+        pubDate ||
+        "",
+
+      published:
         pubDate ||
         "",
 
@@ -1004,23 +1617,35 @@ async function news() {
 
     const response =
       await fetch(
+
         BBC_RSS,
+
         {
-          method: "GET",
+
+          method:
+            "GET",
+
           headers: {
+
             "User-Agent":
               "YepFootball/1.0",
+
             "Accept":
               "application/rss+xml, application/xml, text/xml"
+
           }
+
         }
+
       );
 
 
     if (!response.ok) {
 
       throw new Error(
+
         `BBC RSS returned HTTP ${response.status}`
+
       );
 
     }
@@ -1031,23 +1656,22 @@ async function news() {
 
 
     const articles =
-      parseNews(xml);
+      parseNews(
+        xml
+      );
 
 
     return {
 
       ok: true,
 
-      source: "BBC Sport",
+      source:
+        "BBC Sport",
 
       articles,
 
-      /*
-         Keep news as an alias in case the
-         frontend expects this name.
-      */
-
-      news: articles,
+      news:
+        articles,
 
       count:
         articles.length,
@@ -1057,14 +1681,16 @@ async function news() {
 
     };
 
+  }
 
-  } catch (error) {
+  catch (error) {
 
     return {
 
       ok: false,
 
-      source: "BBC Sport",
+      source:
+        "BBC Sport",
 
       articles: [],
 
@@ -1073,7 +1699,10 @@ async function news() {
       count: 0,
 
       message:
-        String(error?.message || error),
+        String(
+          error?.message ||
+          error
+        ),
 
       updated:
         new Date().toISOString()
@@ -1086,73 +1715,7 @@ async function news() {
 
 
 /* =========================================================
-   API-FOOTBALL
    MATCH CENTRE
-========================================================= */
-
-async function apiFootballFetch(
-  url,
-  env
-) {
-
-  if (!env.API_FOOTBALL_KEY) {
-
-    throw new Error(
-      "Missing Cloudflare secret API_FOOTBALL_KEY"
-    );
-
-  }
-
-
-  const response =
-    await fetch(
-      url,
-      {
-        method: "GET",
-
-        headers: {
-          "x-apisports-key":
-            env.API_FOOTBALL_KEY,
-
-          "Accept":
-            "application/json"
-        }
-      }
-    );
-
-
-  const text =
-    await response.text();
-
-
-  let data;
-
-  try {
-    data =
-      JSON.parse(text);
-  } catch {
-    data = {
-      response: []
-    };
-  }
-
-
-  if (!response.ok) {
-
-    throw new Error(
-      `API-Football HTTP ${response.status}`
-    );
-
-  }
-
-
-  return data;
-
-}
-
-
-/* =========================================================
-   /api/match-centre
 ========================================================= */
 
 async function matchCentre(
@@ -1163,44 +1726,62 @@ async function matchCentre(
   try {
 
     const url =
-      new URL(request.url);
+      new URL(
+        request.url
+      );
 
 
     const league =
-      url.searchParams.get("league") ||
+      url.searchParams.get(
+        "league"
+      ) ||
       "PL";
 
 
     const date =
-      url.searchParams.get("date") ||
+      url.searchParams.get(
+        "date"
+      ) ||
       todayUTC();
 
 
-    const leagueId =
-      API_FOOTBALL_LEAGUES[
+    const competition =
+      COMPETITIONS[
         league.toUpperCase()
       ];
 
 
-    if (!leagueId) {
+    if (!competition) {
 
       return json(
+
         {
+
           ok: false,
+
           message:
             "Unknown league."
+
         },
+
         400
+
       );
 
     }
 
 
     const apiUrl =
+
       `${API_FOOTBALL_BASE}/fixtures` +
-      `?league=${leagueId}` +
+
+      `?league=${competition.id}` +
+
       `&season=2026` +
-      `&date=${encodeURIComponent(date)}`;
+
+      `&date=${encodeURIComponent(
+        date
+      )}`;
 
 
     const data =
@@ -1216,48 +1797,62 @@ async function matchCentre(
 
       league,
 
-      leagueId,
+      leagueId:
+        competition.id,
 
       date,
 
       response:
-        Array.isArray(data.response)
+        Array.isArray(
+          data.response
+        )
           ? data.response
           : [],
 
       results:
         data.results ??
         (
-          Array.isArray(data.response)
+          Array.isArray(
+            data.response
+          )
             ? data.response.length
             : 0
         ),
 
       errors:
-        data.errors || {},
+        data.errors ||
+        {},
 
       updated:
         new Date().toISOString()
 
     });
 
+  }
 
-  } catch (error) {
+  catch (error) {
 
     return json(
+
       {
+
         ok: false,
 
         response: [],
 
         message:
-          String(error?.message || error),
+          String(
+            error?.message ||
+            error
+          ),
 
         updated:
           new Date().toISOString()
 
       },
+
       500
+
     );
 
   }
@@ -1269,7 +1864,9 @@ async function matchCentre(
    HEALTH
 ========================================================= */
 
-async function health(env) {
+async function health(
+  env
+) {
 
   return {
 
@@ -1279,7 +1876,7 @@ async function health(env) {
       "YepFootball API",
 
     version:
-      "2026-09-21.1",
+      "2026-09-22.1",
 
     date:
       todayUTC(),
@@ -1296,6 +1893,23 @@ async function health(env) {
         !!env.API_FOOTBALL_KEY
 
     },
+
+    competitions:
+      Object.entries(
+        COMPETITIONS
+      ).map(
+        ([code, competition]) => ({
+
+          code,
+
+          name:
+            competition.name,
+
+          id:
+            competition.id
+
+        })
+      ),
 
     endpoints: [
 
@@ -1320,7 +1934,7 @@ async function health(env) {
 
 
 /* =========================================================
-   MAIN REQUEST HANDLER
+   MAIN HANDLER
 ========================================================= */
 
 async function handle(
@@ -1329,45 +1943,64 @@ async function handle(
 ) {
 
   const url =
-    new URL(request.url);
+    new URL(
+      request.url
+    );
 
 
   const path =
     url.pathname;
 
 
-  /*
-     CORS pre-flight
-  */
+  /* -----------------------------------------
+     CORS
+  ----------------------------------------- */
 
-  if (request.method === "OPTIONS") {
+  if (
+    request.method ===
+    "OPTIONS"
+  ) {
 
     return new Response(
+
       null,
+
       {
+
         status: 204,
-        headers: corsHeaders()
+
+        headers:
+          corsHeaders()
+
       }
+
     );
 
   }
 
 
-  /*
-     Only GET is required.
-  */
+  /* -----------------------------------------
+     GET ONLY
+  ----------------------------------------- */
 
   if (
-    request.method !== "GET"
+    request.method !==
+    "GET"
   ) {
 
     return json(
+
       {
+
         ok: false,
+
         message:
           "Method not allowed."
+
       },
+
       405
+
     );
 
   }
@@ -1378,8 +2011,13 @@ async function handle(
   ----------------------------------------- */
 
   if (
-    path === "/api/health" ||
-    path === "/api/health/"
+
+    path ===
+      "/api/health" ||
+
+    path ===
+      "/api/health/"
+
   ) {
 
     return json(
@@ -1394,8 +2032,13 @@ async function handle(
   ----------------------------------------- */
 
   if (
-    path === "/api/scores" ||
-    path === "/api/scores/"
+
+    path ===
+      "/api/scores" ||
+
+    path ===
+      "/api/scores/"
+
   ) {
 
     return json(
@@ -1410,12 +2053,18 @@ async function handle(
   ----------------------------------------- */
 
   if (
-    path === "/api/fixtures" ||
-    path === "/api/fixtures/"
+
+    path ===
+      "/api/fixtures" ||
+
+    path ===
+      "/api/fixtures/"
+
   ) {
 
-    return json(
-      await fixtures(env)
+    return fixtures(
+      request,
+      env
     );
 
   }
@@ -1426,8 +2075,13 @@ async function handle(
   ----------------------------------------- */
 
   if (
-    path === "/api/news" ||
-    path === "/api/news/"
+
+    path ===
+      "/api/news" ||
+
+    path ===
+      "/api/news/"
+
   ) {
 
     return json(
@@ -1442,8 +2096,13 @@ async function handle(
   ----------------------------------------- */
 
   if (
-    path === "/api/match-centre" ||
-    path === "/api/match-centre/"
+
+    path ===
+      "/api/match-centre" ||
+
+    path ===
+      "/api/match-centre/"
+
   ) {
 
     return matchCentre(
@@ -1459,38 +2118,52 @@ async function handle(
   ----------------------------------------- */
 
   if (
-    path.startsWith("/api/")
+    path.startsWith(
+      "/api/"
+    )
   ) {
 
     return json(
+
       {
+
         ok: false,
+
         message:
           "API endpoint not found.",
+
         path
+
       },
+
       404
+
     );
 
   }
 
 
-  /*
-     Non-API requests.
-
-     Your normal Cloudflare Pages/site frontend
-     handles the website itself.
-  */
+  /* -----------------------------------------
+     NON-API
+  ----------------------------------------- */
 
   return new Response(
+
     "YepFootball API",
+
     {
+
       status: 200,
+
       headers: {
+
         "Content-Type":
           "text/plain; charset=utf-8"
+
       }
+
     }
+
   );
 
 }
