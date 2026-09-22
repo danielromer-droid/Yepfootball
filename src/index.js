@@ -1,22 +1,69 @@
 /* =========================================================
    YepFootball Cloudflare Worker
-   Version: 2026-09-22.2
+   Version: 2026-09-22.3
+
+   SCORES:
+   API-Football
+
+   FIXTURES:
+   football-data.org
+
+   NEWS:
+   BBC Sport RSS
    ========================================================= */
 
-const API_FOOTBALL_BASE = "https://v3.football.api-sports.io";
+const API_FOOTBALL_BASE =
+  "https://v3.football.api-sports.io";
+
+const FOOTBALL_DATA_BASE =
+  "https://api.football-data.org/v4";
 
 const FIXTURE_CACHE_SECONDS = 1800;
 
+
+/* =========================================================
+   COMPETITIONS
+   ========================================================= */
+
 const COMPETITIONS = [
-  { code: "PL",  name: "Premier League",      id: 39  },
-  { code: "CL",  name: "Champions League",    id: 2   },
-  { code: "EL",  name: "Europa League",       id: 3   },
-  { code: "ECL", name: "Conference League",   id: 848 },
-  { code: "PD",  name: "La Liga",             id: 140 },
-  { code: "SA",  name: "Serie A",             id: 135 },
-  { code: "BL1", name: "Bundesliga",          id: 78  },
-  { code: "FL1", name: "Ligue 1",             id: 61  }
+  {
+    code: "PL",
+    name: "Premier League",
+    footballDataCode: "PL",
+    apiFootballId: 39
+  },
+  {
+    code: "CL",
+    name: "Champions League",
+    footballDataCode: "CL",
+    apiFootballId: 2
+  },
+  {
+    code: "PD",
+    name: "La Liga",
+    footballDataCode: "PD",
+    apiFootballId: 140
+  },
+  {
+    code: "SA",
+    name: "Serie A",
+    footballDataCode: "SA",
+    apiFootballId: 135
+  },
+  {
+    code: "BL1",
+    name: "Bundesliga",
+    footballDataCode: "BL1",
+    apiFootballId: 78
+  },
+  {
+    code: "FL1",
+    name: "Ligue 1",
+    footballDataCode: "FL1",
+    apiFootballId: 61
+  }
 ];
+
 
 /* =========================================================
    CORS
@@ -30,57 +77,93 @@ function corsHeaders() {
   };
 }
 
+
 /* =========================================================
    JSON RESPONSE
    ========================================================= */
 
 function json(data, status = 200, extraHeaders = {}) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      ...corsHeaders(),
-      ...extraHeaders
+
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+      headers: {
+        "Content-Type":
+          "application/json; charset=utf-8",
+
+        ...corsHeaders(),
+        ...extraHeaders
+      }
     }
-  });
+  );
 }
+
 
 /* =========================================================
    DATE HELPERS
    ========================================================= */
 
 function todayUTC() {
-  return new Date().toISOString().slice(0, 10);
+
+  return new Date()
+    .toISOString()
+    .slice(0, 10);
 }
+
 
 function addDays(dateString, days) {
-  const d = new Date(`${dateString}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
+
+  const d =
+    new Date(`${dateString}T00:00:00Z`);
+
+  d.setUTCDate(
+    d.getUTCDate() + days
+  );
+
+  return d
+    .toISOString()
+    .slice(0, 10);
 }
 
+
 /* =========================================================
-   API-FOOTBALL REQUEST
+   API-FOOTBALL
+   Used for SCORES
    ========================================================= */
 
 async function apiFootball(path, env) {
+
   if (!env.API_FOOTBALL_KEY) {
-    throw new Error("Missing Cloudflare secret API_FOOTBALL_KEY");
+
+    throw new Error(
+      "Missing Cloudflare secret API_FOOTBALL_KEY"
+    );
   }
 
-  const response = await fetch(`${API_FOOTBALL_BASE}${path}`, {
-    method: "GET",
-    headers: {
-      "x-apisports-key": env.API_FOOTBALL_KEY,
-      "Accept": "application/json"
+  const response = await fetch(
+    `${API_FOOTBALL_BASE}${path}`,
+    {
+      method: "GET",
+
+      headers: {
+        "x-apisports-key":
+          env.API_FOOTBALL_KEY,
+
+        "Accept":
+          "application/json"
+      }
     }
-  });
+  );
 
   let data = null;
 
   try {
+
     data = await response.json();
+
   } catch {
+
     data = null;
   }
 
@@ -91,329 +174,664 @@ async function apiFootball(path, env) {
   };
 }
 
+
 /* =========================================================
-   FIXTURE NORMALISER
+   FOOTBALL-DATA.ORG
+   Used for FIXTURES
    ========================================================= */
 
-function normaliseFixture(item, competition) {
-  const fixture = item?.fixture || {};
-  const league = item?.league || {};
-  const teams = item?.teams || {};
-  const goals = item?.goals || {};
+async function footballData(path, env) {
+
+  if (!env.FOOTBALL_DATA_TOKEN) {
+
+    throw new Error(
+      "Missing Cloudflare secret FOOTBALL_DATA_TOKEN"
+    );
+  }
+
+  const response = await fetch(
+    `${FOOTBALL_DATA_BASE}${path}`,
+    {
+      method: "GET",
+
+      headers: {
+        "X-Auth-Token":
+          env.FOOTBALL_DATA_TOKEN,
+
+        "Accept":
+          "application/json"
+      }
+    }
+  );
+
+  let data = null;
+
+  try {
+
+    data = await response.json();
+
+  } catch {
+
+    data = null;
+  }
 
   return {
-    id: fixture.id ?? null,
-    date: fixture.date ?? null,
-    timestamp: fixture.timestamp ?? null,
-    status: fixture.status?.short ?? null,
-    statusLong: fixture.status?.long ?? null,
-
-    league: league.name || competition.name,
-    leagueCode: competition.code,
-    leagueId: league.id || competition.id,
-
-    homeTeam: {
-      id: teams.home?.id ?? null,
-      name: teams.home?.name || "",
-      shortName: teams.home?.name || "",
-      crest: teams.home?.logo || ""
-    },
-
-    awayTeam: {
-      id: teams.away?.id ?? null,
-      name: teams.away?.name || "",
-      shortName: teams.away?.name || "",
-      crest: teams.away?.logo || ""
-    },
-
-    homeScore: goals.home ?? null,
-    awayScore: goals.away ?? null
+    httpStatus: response.status,
+    ok: response.ok,
+    data
   };
 }
 
+
 /* =========================================================
-   /api/fixture-test
-   TEMPORARY DIAGNOSTIC ENDPOINT
+   NORMALISE API-FOOTBALL FIXTURE
+   ========================================================= */
+
+function normaliseApiFootballFixture(
+  item,
+  competition
+) {
+
+  const fixture =
+    item?.fixture || {};
+
+  const league =
+    item?.league || {};
+
+  const teams =
+    item?.teams || {};
+
+  const goals =
+    item?.goals || {};
+
+  return {
+
+    id:
+      fixture.id ?? null,
+
+    date:
+      fixture.date ?? null,
+
+    timestamp:
+      fixture.timestamp ?? null,
+
+    status:
+      fixture.status?.short ?? null,
+
+    statusLong:
+      fixture.status?.long ?? null,
+
+    league:
+      league.name ||
+      competition.name,
+
+    leagueCode:
+      competition.code,
+
+    leagueId:
+      league.id ||
+      competition.apiFootballId,
+
+    homeTeam: {
+
+      id:
+        teams.home?.id ?? null,
+
+      name:
+        teams.home?.name || "",
+
+      shortName:
+        teams.home?.name || "",
+
+      crest:
+        teams.home?.logo || ""
+    },
+
+    awayTeam: {
+
+      id:
+        teams.away?.id ?? null,
+
+      name:
+        teams.away?.name || "",
+
+      shortName:
+        teams.away?.name || "",
+
+      crest:
+        teams.away?.logo || ""
+    },
+
+    homeScore:
+      goals.home ?? null,
+
+    awayScore:
+      goals.away ?? null
+  };
+}
+
+
+/* =========================================================
+   NORMALISE FOOTBALL-DATA.ORG FIXTURE
+   ========================================================= */
+
+function normaliseFootballDataFixture(
+  item
+) {
+
+  return {
+
+    id:
+      item.id ?? null,
+
+    date:
+      item.utcDate ?? null,
+
+    timestamp:
+      item.utcDate
+        ? Math.floor(
+            new Date(item.utcDate)
+              .getTime() / 1000
+          )
+        : null,
+
+    status:
+      item.status ?? null,
+
+    statusLong:
+      item.status ?? null,
+
+    league:
+      item.competition?.name ||
+      "Football",
+
+    leagueCode:
+      item.competition?.code ||
+      "",
+
+    leagueId:
+      item.competition?.id ??
+      null,
+
+    homeTeam: {
+
+      id:
+        item.homeTeam?.id ??
+        null,
+
+      name:
+        item.homeTeam?.name ||
+        "",
+
+      shortName:
+        item.homeTeam?.shortName ||
+        item.homeTeam?.name ||
+        "",
+
+      crest:
+        item.homeTeam?.crest ||
+        ""
+    },
+
+    awayTeam: {
+
+      id:
+        item.awayTeam?.id ??
+        null,
+
+      name:
+        item.awayTeam?.name ||
+        "",
+
+      shortName:
+        item.awayTeam?.shortName ||
+        item.awayTeam?.name ||
+        "",
+
+      crest:
+        item.awayTeam?.crest ||
+        ""
+    },
+
+    homeScore:
+      item.score?.fullTime?.home ??
+      null,
+
+    awayScore:
+      item.score?.fullTime?.away ??
+      null
+  };
+}
+
+
+/* =========================================================
+   FIXTURE TEST
    ========================================================= */
 
 async function fixtureTest(env) {
 
-  const competition = {
-    code: "PL",
-    name: "Premier League",
-    id: 39
-  };
-
-  const url =
-    `${API_FOOTBALL_BASE}/fixtures` +
-    `?league=${competition.id}` +
-    `&season=2026` +
-    `&next=5`;
-
   try {
 
-    if (!env.API_FOOTBALL_KEY) {
-      return json({
-        ok: false,
-        error: "API_FOOTBALL_KEY is missing"
-      }, 500);
-    }
+    const from =
+      todayUTC();
 
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "x-apisports-key": env.API_FOOTBALL_KEY,
-        "Accept": "application/json"
-      }
-    });
+    const to =
+      addDays(from, 9);
 
-    const text = await response.text();
+    const path =
+      `/matches?competitions=PL,CL,PD,SA,BL1,FL1` +
+      `&dateFrom=${from}` +
+      `&dateTo=${to}`;
 
-    let parsed = null;
-
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = null;
-    }
+    const result =
+      await footballData(path, env);
 
     return json({
-      ok: response.ok,
-      endpoint: "API-Football diagnostic",
-      httpStatus: response.status,
+
+      ok:
+        result.ok,
+
+      source:
+        "football-data.org",
+
+      httpStatus:
+        result.httpStatus,
 
       request: {
-        league: competition.id,
-        competition: competition.name,
-        season: 2026,
-        next: 5
+
+        competitions:
+          "PL,CL,PD,SA,BL1,FL1",
+
+        dateFrom:
+          from,
+
+        dateTo:
+          to
       },
 
-      apiMessage: parsed?.message || null,
-      apiResults: parsed?.results ?? null,
+      apiCount:
+        result.data?.count ??
+        0,
 
-      response: parsed,
+      matches:
+        result.data?.matches ??
+        [],
 
-      rawResponsePreview:
-        parsed === null
-          ? text.slice(0, 2000)
-          : null,
+      message:
+        result.data?.message ||
+        null,
 
-      checked: new Date().toISOString()
+      checked:
+        new Date().toISOString()
     });
 
   } catch (error) {
 
     return json({
+
       ok: false,
-      endpoint: "API-Football diagnostic",
-      error: error?.message || String(error),
-      checked: new Date().toISOString()
+
+      source:
+        "football-data.org",
+
+      error:
+        error?.message ||
+        String(error),
+
+      checked:
+        new Date().toISOString()
+
     }, 500);
   }
 }
+
 
 /* =========================================================
    FIXTURES
    ========================================================= */
 
-async function fixtures(request, env) {
+async function fixtures(
+  request,
+  env
+) {
 
-  const now = new Date();
+  const now =
+    new Date();
 
-  const from = todayUTC();
-  const to = addDays(from, 7);
+  const today =
+    todayUTC();
 
-  const cacheUrl = new URL(request.url);
-  cacheUrl.pathname = "/api/fixtures";
-  cacheUrl.search = "";
+  /*
+    Cloudflare cache key
+  */
 
-  const cache = caches.default;
+  const cacheUrl =
+    new URL(request.url);
 
-  const cached = await cache.match(cacheUrl);
+  cacheUrl.pathname =
+    "/api/fixtures";
+
+  cacheUrl.search =
+    "";
+
+  const cache =
+    caches.default;
+
+  const cached =
+    await cache.match(cacheUrl);
 
   if (cached) {
+
     return cached;
   }
 
-  const allFixtures = [];
-  const diagnostics = [];
 
   /*
-    First try the normal upcoming 7-day period.
+    We check up to three 10-day periods.
+
+    This is important because:
+    - football-data.org does not allow
+      periods longer than 10 days
+    - there may be an international break
+      during the first period
   */
 
-  for (const competition of COMPETITIONS) {
+  const windows = [
+
+    {
+      from: today,
+      to: addDays(today, 9)
+    },
+
+    {
+      from: addDays(today, 10),
+      to: addDays(today, 19)
+    },
+
+    {
+      from: addDays(today, 20),
+      to: addDays(today, 29)
+    }
+
+  ];
+
+
+  const allFixtures = [];
+
+  const diagnostics = [];
+
+  let selectedWindow =
+    null;
+
+
+  /*
+    Search the windows sequentially.
+  */
+
+  for (
+    const window of windows
+  ) {
+
+    if (allFixtures.length > 0) {
+      break;
+    }
+
 
     const path =
-      `/fixtures` +
-      `?league=${competition.id}` +
-      `&season=2026` +
-      `&from=${from}` +
-      `&to=${to}`;
+      `/matches?competitions=PL,CL,PD,SA,BL1,FL1` +
+      `&dateFrom=${window.from}` +
+      `&dateTo=${window.to}`;
+
 
     try {
 
-      const result = await apiFootball(path, env);
+      const result =
+        await footballData(
+          path,
+          env
+        );
 
-      const apiResults = result.data?.results ?? 0;
-      const responseFixtures = result.data?.response ?? [];
+
+      const matches =
+        result.data?.matches ||
+        [];
+
 
       diagnostics.push({
-        competition: competition.code,
-        returned: responseFixtures.length,
-        apiResults,
-        httpStatus: result.httpStatus,
-        apiMessage: result.data?.message || null
+
+        from:
+          window.from,
+
+        to:
+          window.to,
+
+        httpStatus:
+          result.httpStatus,
+
+        returned:
+          matches.length,
+
+        apiCount:
+          result.data?.count ??
+          0,
+
+        message:
+          result.data?.message ||
+          null
       });
 
-      for (const item of responseFixtures) {
-        allFixtures.push(
-          normaliseFixture(item, competition)
-        );
+
+      if (
+        matches.length > 0
+      ) {
+
+        selectedWindow =
+          window;
+
+
+        for (
+          const item of matches
+        ) {
+
+          allFixtures.push(
+            normaliseFootballDataFixture(
+              item
+            )
+          );
+        }
       }
+
 
     } catch (error) {
 
       diagnostics.push({
-        competition: competition.code,
-        returned: 0,
-        apiResults: 0,
-        error: error?.message || String(error)
+
+        from:
+          window.from,
+
+        to:
+          window.to,
+
+        returned:
+          0,
+
+        error:
+          error?.message ||
+          String(error)
       });
     }
   }
 
-  /*
-    If the 7-day period has no fixtures, try next=5.
 
-    This helps distinguish:
-    - genuinely no fixtures
-    - a date-window problem
-    - API-Football behaviour
+  /*
+    Sort by date.
   */
 
-  let mode = "upcoming";
-  let isNextAvailable = false;
+  allFixtures.sort(
+    (a, b) =>
+      new Date(a.date || 0) -
+      new Date(b.date || 0)
+  );
 
-  if (allFixtures.length === 0) {
 
-    mode = "next";
+  /*
+    Remove duplicates.
+  */
 
-    for (const competition of COMPETITIONS) {
+  const unique =
+    [];
 
-      const path =
-        `/fixtures` +
-        `?league=${competition.id}` +
-        `&season=2026` +
-        `&next=5`;
+  const seen =
+    new Set();
 
-      try {
 
-        const result = await apiFootball(path, env);
+  for (
+    const fixture of allFixtures
+  ) {
 
-        const apiResults = result.data?.results ?? 0;
-        const responseFixtures = result.data?.response ?? [];
+    const key =
+      fixture.id ||
+      `${fixture.date}-${fixture.homeTeam.name}-${fixture.awayTeam.name}`;
 
-        diagnostics.push({
-          competition: `${competition.code}-NEXT`,
-          returned: responseFixtures.length,
-          apiResults,
-          httpStatus: result.httpStatus,
-          apiMessage: result.data?.message || null
-        });
 
-        if (responseFixtures.length > 0) {
-          isNextAvailable = true;
-        }
-
-        for (const item of responseFixtures) {
-          allFixtures.push(
-            normaliseFixture(item, competition)
-          );
-        }
-
-      } catch (error) {
-
-        diagnostics.push({
-          competition: `${competition.code}-NEXT`,
-          returned: 0,
-          apiResults: 0,
-          error: error?.message || String(error)
-        });
-      }
+    if (
+      seen.has(key)
+    ) {
+      continue;
     }
+
+
+    seen.add(key);
+
+    unique.push(
+      fixture
+    );
   }
 
-  /*
-    Sort fixtures by date/time.
-  */
-
-  allFixtures.sort((a, b) => {
-    return new Date(a.date || 0) - new Date(b.date || 0);
-  });
 
   /*
-    Limit response to 40 fixtures.
+    Maximum 40 fixtures.
   */
 
-  const fixturesList = allFixtures.slice(0, 40);
+  const fixturesList =
+    unique.slice(0, 40);
+
+
+  /*
+    Determine mode.
+  */
+
+  let mode =
+    "upcoming";
+
+
+  let isNextAvailable =
+    false;
+
+
+  if (
+    selectedWindow &&
+    selectedWindow.from !== today
+  ) {
+
+    mode =
+      "next";
+
+    isNextAvailable =
+      true;
+  }
+
+
+  /*
+    Response
+  */
 
   const responseData = {
-    ok: true,
-    source: "API-Football",
 
-    from,
-    to,
+    ok: true,
+
+    source:
+      "football-data.org",
+
+    from:
+      today,
+
+    to:
+      selectedWindow
+        ? selectedWindow.to
+        : addDays(today, 29),
 
     mode,
+
     isNextAvailable,
 
-    fixtures: fixturesList,
+    fixtures:
+      fixturesList,
 
     /*
-      Keep events for compatibility with the existing frontend.
+      Keep compatibility with
+      your existing app.js.
     */
-    events: fixturesList,
 
-    count: fixturesList.length,
+    events:
+      fixturesList,
+
+    count:
+      fixturesList.length,
 
     diagnostics,
 
-    updated: now.toISOString()
+    updated:
+      now.toISOString()
   };
 
-  const response = json(responseData, 200, {
-    "Cache-Control": `public, max-age=${FIXTURE_CACHE_SECONDS}`
-  });
 
-  /*
-    Store in Cloudflare edge cache.
-  */
+  const response =
+    json(
+      responseData,
+      200,
+      {
+        "Cache-Control":
+          `public, max-age=${FIXTURE_CACHE_SECONDS}`
+      }
+    );
 
-  await cache.put(cacheUrl, response.clone());
+
+  await cache.put(
+    cacheUrl,
+    response.clone()
+  );
+
 
   return response;
 }
+
 
 /* =========================================================
    SCORES
    ========================================================= */
 
-async function scores(request, env) {
+async function scores(
+  request,
+  env
+) {
 
   /*
-    Keep the existing score system available.
-
-    If LATEST_SCORES contains a cached response,
-    return it.
+    Keep existing LATEST_SCORES
+    behaviour.
   */
 
-  if (env.LATEST_SCORES) {
+  if (
+    env.LATEST_SCORES
+  ) {
 
     try {
 
-      const cached = await env.LATEST_SCORES.get("scores");
+      const cached =
+        await env.LATEST_SCORES.get(
+          "scores"
+        );
+
 
       if (cached) {
 
@@ -426,75 +844,172 @@ async function scores(request, env) {
 
     } catch (error) {
 
-      console.log("LATEST_SCORES read error:", error);
+      console.log(
+        "LATEST_SCORES read error:",
+        error
+      );
     }
   }
 
+
   /*
-    Fallback to API-Football.
+    API-Football fallback.
   */
 
   try {
 
-    const date = todayUTC();
+    const date =
+      todayUTC();
 
-    const result = await apiFootball(
-      `/fixtures?date=${date}`,
-      env
-    );
 
-    if (!result.ok) {
+    const result =
+      await apiFootball(
+        `/fixtures?date=${date}`,
+        env
+      );
+
+
+    if (
+      !result.ok
+    ) {
 
       return json({
+
         ok: false,
-        error: "API-Football request failed",
-        httpStatus: result.httpStatus,
-        response: result.data
+
+        error:
+          "API-Football request failed",
+
+        httpStatus:
+          result.httpStatus,
+
+        response:
+          result.data
+
       }, 502);
     }
 
-    const responseFixtures = result.data?.response ?? [];
 
-    const events = responseFixtures.map(item => {
+    const responseFixtures =
+      result.data?.response ||
+      [];
 
-      const competition = COMPETITIONS.find(
-        c => c.id === item?.league?.id
-      ) || {
-        code: String(item?.league?.id || ""),
-        name: item?.league?.name || "Football",
-        id: item?.league?.id || null
-      };
 
-      return normaliseFixture(item, competition);
-    });
+    const events =
+      responseFixtures.map(
+        item => {
+
+          const competition =
+            COMPETITIONS.find(
+              c =>
+                c.apiFootballId ===
+                item?.league?.id
+            ) ||
+            {
+
+              code:
+                String(
+                  item?.league?.id ||
+                  ""
+                ),
+
+              name:
+                item?.league?.name ||
+                "Football",
+
+              apiFootballId:
+                item?.league?.id ||
+                null
+            };
+
+
+          return normaliseApiFootballFixture(
+            item,
+            competition
+          );
+        }
+      );
+
 
     return json({
+
       ok: true,
+
       events,
-      live: events.filter(e =>
-        ["1H", "2H", "HT", "ET", "P"].includes(e.status)
-      ),
-      finished: events.filter(e =>
-        ["FT", "AET", "PEN"].includes(e.status)
-      ),
-      upcoming: events.filter(e =>
-        ["NS", "TBD"].includes(e.status)
-      ),
-      count: events.length,
-      liveCount: events.filter(e =>
-        ["1H", "2H", "HT", "ET", "P"].includes(e.status)
-      ).length,
-      updated: new Date().toISOString()
+
+      live:
+        events.filter(
+          e =>
+            [
+              "1H",
+              "2H",
+              "HT",
+              "ET",
+              "P"
+            ].includes(
+              e.status
+            )
+        ),
+
+      finished:
+        events.filter(
+          e =>
+            [
+              "FT",
+              "AET",
+              "PEN"
+            ].includes(
+              e.status
+            )
+        ),
+
+      upcoming:
+        events.filter(
+          e =>
+            [
+              "NS",
+              "TBD"
+            ].includes(
+              e.status
+            )
+        ),
+
+      count:
+        events.length,
+
+      liveCount:
+        events.filter(
+          e =>
+            [
+              "1H",
+              "2H",
+              "HT",
+              "ET",
+              "P"
+            ].includes(
+              e.status
+            )
+        ).length,
+
+      updated:
+        new Date().toISOString()
     });
+
 
   } catch (error) {
 
     return json({
+
       ok: false,
-      error: error?.message || String(error)
+
+      error:
+        error?.message ||
+        String(error)
+
     }, 500);
   }
 }
+
 
 /* =========================================================
    BBC NEWS
@@ -502,107 +1017,233 @@ async function scores(request, env) {
 
 function decodeEntities(str) {
 
-  if (!str) return "";
+  if (!str) {
+    return "";
+  }
+
 
   return str
-    .replace(/<!\[CDATA\[/g, "")
-    .replace(/\]\]>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
+
+    .replace(
+      /<!\[CDATA\[/g,
+      ""
+    )
+
+    .replace(
+      /\]\]>/g,
+      ""
+    )
+
+    .replace(
+      /&amp;/g,
+      "&"
+    )
+
+    .replace(
+      /&lt;/g,
+      "<"
+    )
+
+    .replace(
+      /&gt;/g,
+      ">"
+    )
+
+    .replace(
+      /&quot;/g,
+      '"'
+    )
+
+    .replace(
+      /&#39;/g,
+      "'"
+    )
+
+    .replace(
+      /&#x27;/g,
+      "'"
+    )
+
     .trim();
 }
 
-function xmlValue(block, tag) {
 
-  const re = new RegExp(
-    `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
-    "i"
-  );
+function xmlValue(
+  block,
+  tag
+) {
 
-  const match = block.match(re);
+  const re =
+    new RegExp(
+      `<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,
+      "i"
+    );
+
+
+  const match =
+    block.match(re);
+
 
   return match
-    ? decodeEntities(match[1])
+    ? decodeEntities(
+        match[1]
+      )
     : "";
 }
 
+
 function parseBBCNews(xml) {
 
-  const items = [];
+  const items =
+    [];
 
-  const matches = xml.match(
-    /<item[\s\S]*?<\/item>/gi
-  ) || [];
 
-  for (const block of matches) {
+  const matches =
+    xml.match(
+      /<item[\s\S]*?<\/item>/gi
+    ) || [];
 
-    const title = xmlValue(block, "title");
-    const link = xmlValue(block, "link");
-    const description = xmlValue(block, "description");
-    const pubDate = xmlValue(block, "pubDate");
 
-    if (!title) continue;
+  for (
+    const block of matches
+  ) {
+
+    const title =
+      xmlValue(
+        block,
+        "title"
+      );
+
+
+    const link =
+      xmlValue(
+        block,
+        "link"
+      );
+
+
+    const description =
+      xmlValue(
+        block,
+        "description"
+      );
+
+
+    const pubDate =
+      xmlValue(
+        block,
+        "pubDate"
+      );
+
+
+    if (!title) {
+      continue;
+    }
+
 
     items.push({
+
       title,
+
       description,
+
       link,
+
       pubDate,
-      source: "BBC Sport"
+
+      source:
+        "BBC Sport"
     });
   }
 
-  return items.slice(0, 12);
+
+  return items.slice(
+    0,
+    12
+  );
 }
+
 
 async function news() {
 
   const url =
     "https://feeds.bbci.co.uk/sport/football/rss.xml";
 
+
   try {
 
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 YepFootball/2026"
-      }
-    });
+    const response =
+      await fetch(
+        url,
+        {
+          headers: {
 
-    if (!response.ok) {
+            "User-Agent":
+              "Mozilla/5.0 YepFootball/2026"
+          }
+        }
+      );
+
+
+    if (
+      !response.ok
+    ) {
 
       return json({
+
         ok: false,
-        error: `BBC RSS HTTP ${response.status}`,
+
+        error:
+          `BBC RSS HTTP ${response.status}`,
+
         articles: []
+
       }, 502);
     }
 
-    const xml = await response.text();
 
-    const articles = parseBBCNews(xml);
+    const xml =
+      await response.text();
+
+
+    const articles =
+      parseBBCNews(xml);
+
 
     return json({
+
       ok: true,
-      source: "BBC Sport",
+
+      source:
+        "BBC Sport",
+
       articles,
-      count: articles.length,
-      updated: new Date().toISOString()
+
+      count:
+        articles.length,
+
+      updated:
+        new Date().toISOString()
+
     });
+
 
   } catch (error) {
 
     return json({
+
       ok: false,
-      error: error?.message || String(error),
+
+      error:
+        error?.message ||
+        String(error),
+
       articles: []
+
     }, 500);
   }
 }
+
 
 /* =========================================================
    HEALTH
@@ -611,31 +1252,80 @@ async function news() {
 async function health(env) {
 
   return json({
+
     ok: true,
-    service: "YepFootball API",
-    version: "2026-09-22.2",
-    date: todayUTC(),
+
+    service:
+      "YepFootball API",
+
+    version:
+      "2026-09-22.3",
+
+    date:
+      todayUTC(),
 
     bindings: {
-      LATEST_SCORES: !!env.LATEST_SCORES,
-      FOOTBALL_DATA_TOKEN: !!env.FOOTBALL_DATA_TOKEN,
-      API_FOOTBALL_KEY: !!env.API_FOOTBALL_KEY
+
+      LATEST_SCORES:
+        !!env.LATEST_SCORES,
+
+      FOOTBALL_DATA_TOKEN:
+        !!env.FOOTBALL_DATA_TOKEN,
+
+      API_FOOTBALL_KEY:
+        !!env.API_FOOTBALL_KEY
     },
 
-    competitions: COMPETITIONS,
+
+    fixtureSource:
+      "football-data.org",
+
+
+    scoreSource:
+      "API-Football",
+
+
+    competitions:
+      COMPETITIONS.map(
+        c => ({
+
+          code:
+            c.code,
+
+          name:
+            c.name,
+
+          footballDataCode:
+            c.footballDataCode,
+
+          apiFootballId:
+            c.apiFootballId
+        })
+      ),
+
 
     endpoints: [
+
       "/api/scores",
+
       "/api/fixtures",
+
       "/api/fixture-test",
+
       "/api/news",
+
       "/api/match-centre",
+
       "/api/health"
+
     ],
 
-    updated: new Date().toISOString()
+
+    updated:
+      new Date().toISOString()
   });
 }
+
 
 /* =========================================================
    MATCH CENTRE
@@ -644,11 +1334,18 @@ async function health(env) {
 async function matchCentre() {
 
   return json({
+
     ok: true,
-    message: "Match Centre ready",
-    updated: new Date().toISOString()
+
+    message:
+      "Match Centre ready",
+
+    updated:
+      new Date().toISOString()
+
   });
 }
+
 
 /* =========================================================
    MAIN HANDLER
@@ -656,59 +1353,131 @@ async function matchCentre() {
 
 export default {
 
-  async fetch(request, env, ctx) {
+  async fetch(
+    request,
+    env,
+    ctx
+  ) {
 
-    if (request.method === "OPTIONS") {
+    if (
+      request.method ===
+      "OPTIONS"
+    ) {
 
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders()
-      });
+      return new Response(
+        null,
+        {
+          status: 204,
+
+          headers:
+            corsHeaders()
+        }
+      );
     }
 
-    const url = new URL(request.url);
-    const path = url.pathname;
+
+    const url =
+      new URL(request.url);
+
+
+    const path =
+      url.pathname;
+
 
     try {
 
-      if (path === "/api/health") {
-        return await health(env);
+      if (
+        path ===
+        "/api/health"
+      ) {
+
+        return await health(
+          env
+        );
       }
 
-      if (path === "/api/fixture-test") {
-        return await fixtureTest(env);
+
+      if (
+        path ===
+        "/api/fixture-test"
+      ) {
+
+        return await fixtureTest(
+          env
+        );
       }
 
-      if (path === "/api/fixtures") {
-        return await fixtures(request, env);
+
+      if (
+        path ===
+        "/api/fixtures"
+      ) {
+
+        return await fixtures(
+          request,
+          env
+        );
       }
 
-      if (path === "/api/scores") {
-        return await scores(request, env);
+
+      if (
+        path ===
+        "/api/scores"
+      ) {
+
+        return await scores(
+          request,
+          env
+        );
       }
 
-      if (path === "/api/news") {
+
+      if (
+        path ===
+        "/api/news"
+      ) {
+
         return await news();
       }
 
-      if (path === "/api/match-centre") {
+
+      if (
+        path ===
+        "/api/match-centre"
+      ) {
+
         return await matchCentre();
       }
 
-      return new Response("YepFootball Worker OK", {
-        status: 200,
-        headers: {
-          ...corsHeaders(),
-          "Content-Type": "text/plain; charset=utf-8"
+
+      return new Response(
+        "YepFootball Worker OK",
+        {
+          status: 200,
+
+          headers: {
+
+            ...corsHeaders(),
+
+            "Content-Type":
+              "text/plain; charset=utf-8"
+          }
         }
-      });
+      );
+
 
     } catch (error) {
 
       return json({
+
         ok: false,
-        error: error?.message || String(error),
+
+        error:
+          error?.message ||
+          String(error),
+
         path
+
       }, 500);
     }
   }
