@@ -546,29 +546,25 @@ async function fixtures(
      ------------------------------------------------------- */
 
   const cacheUrl =
-    new URL(request.url);
+  new URL(request.url);
 
-  cacheUrl.pathname =
-    "/api/fixtures";
+cacheUrl.pathname =
+  "/api/fixtures-v20260922";
 
-  cacheUrl.search =
-    "";
+cacheUrl.search =
+  "";
 
+const cache =
+  caches.default;
 
-  const cache =
-    caches.default;
+const cached =
+  await cache.match(
+    cacheUrl
+  );
 
-
-  const cached =
-    await cache.match(
-      cacheUrl
-    );
-
-
-  if (cached) {
-
-    return cached;
-  }
+if (cached) {
+  return cached;
+}
 
 
   /* -------------------------------------------------------
