@@ -1,15 +1,10 @@
 /* =========================================================
    YepFootball Cloudflare Worker
-   Version: 2026-09-22.3
+   Version: 2026-09-22.4
 
-   SCORES:
-   API-Football
-
-   FIXTURES:
-   football-data.org
-
-   NEWS:
-   BBC Sport RSS
+   SCORES   -> API-Football / existing LATEST_SCORES
+   FIXTURES -> football-data.org
+   NEWS     -> BBC Sport RSS
    ========================================================= */
 
 const API_FOOTBALL_BASE =
@@ -79,15 +74,20 @@ function corsHeaders() {
 
 
 /* =========================================================
-   JSON RESPONSE
+   JSON
    ========================================================= */
 
-function json(data, status = 200, extraHeaders = {}) {
+function json(
+  data,
+  status = 200,
+  extraHeaders = {}
+) {
 
   return new Response(
     JSON.stringify(data),
     {
       status,
+
       headers: {
         "Content-Type":
           "application/json; charset=utf-8",
@@ -112,10 +112,15 @@ function todayUTC() {
 }
 
 
-function addDays(dateString, days) {
+function addDays(
+  dateString,
+  days
+) {
 
   const d =
-    new Date(`${dateString}T00:00:00Z`);
+    new Date(
+      `${dateString}T00:00:00Z`
+    );
 
   d.setUTCDate(
     d.getUTCDate() + days
@@ -129,10 +134,12 @@ function addDays(dateString, days) {
 
 /* =========================================================
    API-FOOTBALL
-   Used for SCORES
    ========================================================= */
 
-async function apiFootball(path, env) {
+async function apiFootball(
+  path,
+  env
+) {
 
   if (!env.API_FOOTBALL_KEY) {
 
@@ -141,35 +148,44 @@ async function apiFootball(path, env) {
     );
   }
 
-  const response = await fetch(
-    `${API_FOOTBALL_BASE}${path}`,
-    {
-      method: "GET",
 
-      headers: {
-        "x-apisports-key":
-          env.API_FOOTBALL_KEY,
+  const response =
+    await fetch(
+      `${API_FOOTBALL_BASE}${path}`,
+      {
+        method: "GET",
 
-        "Accept":
-          "application/json"
+        headers: {
+          "x-apisports-key":
+            env.API_FOOTBALL_KEY,
+
+          "Accept":
+            "application/json"
+        }
       }
-    }
-  );
+    );
+
 
   let data = null;
 
   try {
 
-    data = await response.json();
+    data =
+      await response.json();
 
   } catch {
 
     data = null;
   }
 
+
   return {
-    httpStatus: response.status,
-    ok: response.ok,
+    httpStatus:
+      response.status,
+
+    ok:
+      response.ok,
+
     data
   };
 }
@@ -177,10 +193,12 @@ async function apiFootball(path, env) {
 
 /* =========================================================
    FOOTBALL-DATA.ORG
-   Used for FIXTURES
    ========================================================= */
 
-async function footballData(path, env) {
+async function footballData(
+  path,
+  env
+) {
 
   if (!env.FOOTBALL_DATA_TOKEN) {
 
@@ -189,42 +207,51 @@ async function footballData(path, env) {
     );
   }
 
-  const response = await fetch(
-    `${FOOTBALL_DATA_BASE}${path}`,
-    {
-      method: "GET",
 
-      headers: {
-        "X-Auth-Token":
-          env.FOOTBALL_DATA_TOKEN,
+  const response =
+    await fetch(
+      `${FOOTBALL_DATA_BASE}${path}`,
+      {
+        method: "GET",
 
-        "Accept":
-          "application/json"
+        headers: {
+          "X-Auth-Token":
+            env.FOOTBALL_DATA_TOKEN,
+
+          "Accept":
+            "application/json"
+        }
       }
-    }
-  );
+    );
+
 
   let data = null;
 
   try {
 
-    data = await response.json();
+    data =
+      await response.json();
 
   } catch {
 
     data = null;
   }
 
+
   return {
-    httpStatus: response.status,
-    ok: response.ok,
+    httpStatus:
+      response.status,
+
+    ok:
+      response.ok,
+
     data
   };
 }
 
 
 /* =========================================================
-   NORMALISE API-FOOTBALL FIXTURE
+   API-FOOTBALL NORMALISER
    ========================================================= */
 
 function normaliseApiFootballFixture(
@@ -243,6 +270,7 @@ function normaliseApiFootballFixture(
 
   const goals =
     item?.goals || {};
+
 
   return {
 
@@ -312,7 +340,7 @@ function normaliseApiFootballFixture(
 
 
 /* =========================================================
-   NORMALISE FOOTBALL-DATA.ORG FIXTURE
+   FOOTBALL-DATA.ORG NORMALISER
    ========================================================= */
 
 function normaliseFootballDataFixture(
@@ -330,8 +358,9 @@ function normaliseFootballDataFixture(
     timestamp:
       item.utcDate
         ? Math.floor(
-            new Date(item.utcDate)
-              .getTime() / 1000
+            new Date(
+              item.utcDate
+            ).getTime() / 1000
           )
         : null,
 
@@ -416,15 +445,24 @@ async function fixtureTest(env) {
       todayUTC();
 
     const to =
-      addDays(from, 9);
+      addDays(
+        from,
+        9
+      );
+
 
     const path =
       `/matches?competitions=PL,CL,PD,SA,BL1,FL1` +
       `&dateFrom=${from}` +
       `&dateTo=${to}`;
 
+
     const result =
-      await footballData(path, env);
+      await footballData(
+        path,
+        env
+      );
+
 
     return json({
 
@@ -463,6 +501,7 @@ async function fixtureTest(env) {
 
       checked:
         new Date().toISOString()
+
     });
 
   } catch (error) {
@@ -501,9 +540,10 @@ async function fixtures(
   const today =
     todayUTC();
 
-  /*
-    Cloudflare cache key
-  */
+
+  /* -------------------------------------------------------
+     CACHE
+     ------------------------------------------------------- */
 
   const cacheUrl =
     new URL(request.url);
@@ -514,11 +554,16 @@ async function fixtures(
   cacheUrl.search =
     "";
 
+
   const cache =
     caches.default;
 
+
   const cached =
-    await cache.match(cacheUrl);
+    await cache.match(
+      cacheUrl
+    );
+
 
   if (cached) {
 
@@ -526,53 +571,64 @@ async function fixtures(
   }
 
 
-  /*
-    We check up to three 10-day periods.
+  /* -------------------------------------------------------
+     SEARCH WINDOWS
 
-    This is important because:
-    - football-data.org does not allow
-      periods longer than 10 days
-    - there may be an international break
-      during the first period
-  */
+     football-data.org allows maximum 10 days.
 
-  const windows = [
+     Search 60 days ahead in 10-day blocks.
+     ------------------------------------------------------- */
 
-    {
-      from: today,
-      to: addDays(today, 9)
-    },
-
-    {
-      from: addDays(today, 10),
-      to: addDays(today, 19)
-    },
-
-    {
-      from: addDays(today, 20),
-      to: addDays(today, 29)
-    }
-
-  ];
+  const windows = [];
 
 
-  const allFixtures = [];
+  for (
+    let offset = 0;
+    offset < 60;
+    offset += 10
+  ) {
 
-  const diagnostics = [];
+    windows.push({
+
+      from:
+        addDays(
+          today,
+          offset
+        ),
+
+      to:
+        addDays(
+          today,
+          offset + 9
+        )
+    });
+  }
+
+
+  const allFixtures =
+    [];
+
+  const diagnostics =
+    [];
 
   let selectedWindow =
     null;
 
 
-  /*
-    Search the windows sequentially.
-  */
+  /* -------------------------------------------------------
+     SEARCH WINDOWS
+
+     Stop once we have fixtures.
+     ------------------------------------------------------- */
 
   for (
     const window of windows
   ) {
 
-    if (allFixtures.length > 0) {
+    if (
+      allFixtures.length > 0
+    ) {
+
       break;
     }
 
@@ -630,12 +686,12 @@ async function fixtures(
 
 
         for (
-          const item of matches
+          const match of matches
         ) {
 
           allFixtures.push(
             normaliseFootballDataFixture(
-              item
+              match
             )
           );
         }
@@ -663,20 +719,24 @@ async function fixtures(
   }
 
 
-  /*
-    Sort by date.
-  */
+  /* -------------------------------------------------------
+     SORT
+     ------------------------------------------------------- */
 
   allFixtures.sort(
     (a, b) =>
-      new Date(a.date || 0) -
-      new Date(b.date || 0)
+      new Date(
+        a.date || 0
+      ) -
+      new Date(
+        b.date || 0
+      )
   );
 
 
-  /*
-    Remove duplicates.
-  */
+  /* -------------------------------------------------------
+     REMOVE DUPLICATES
+     ------------------------------------------------------- */
 
   const unique =
     [];
@@ -697,6 +757,7 @@ async function fixtures(
     if (
       seen.has(key)
     ) {
+
       continue;
     }
 
@@ -709,17 +770,20 @@ async function fixtures(
   }
 
 
-  /*
-    Maximum 40 fixtures.
-  */
+  /* -------------------------------------------------------
+     LIMIT
+     ------------------------------------------------------- */
 
   const fixturesList =
-    unique.slice(0, 40);
+    unique.slice(
+      0,
+      40
+    );
 
 
-  /*
-    Determine mode.
-  */
+  /* -------------------------------------------------------
+     MODE
+     ------------------------------------------------------- */
 
   let mode =
     "upcoming";
@@ -742,9 +806,33 @@ async function fixtures(
   }
 
 
-  /*
-    Response
-  */
+  /* -------------------------------------------------------
+     MESSAGE
+     ------------------------------------------------------- */
+
+  let message =
+    null;
+
+
+  if (
+    fixturesList.length === 0
+  ) {
+
+    message =
+      "No fixtures found in the next 60 days.";
+
+  } else if (
+    isNextAvailable
+  ) {
+
+    message =
+      "No fixtures during the current period. Showing the next available matches.";
+  }
+
+
+  /* -------------------------------------------------------
+     RESPONSE
+     ------------------------------------------------------- */
 
   const responseData = {
 
@@ -759,7 +847,10 @@ async function fixtures(
     to:
       selectedWindow
         ? selectedWindow.to
-        : addDays(today, 29),
+        : addDays(
+            today,
+            59
+          ),
 
     mode,
 
@@ -769,8 +860,7 @@ async function fixtures(
       fixturesList,
 
     /*
-      Keep compatibility with
-      your existing app.js.
+      Compatibility with existing app.js
     */
 
     events:
@@ -778,6 +868,8 @@ async function fixtures(
 
     count:
       fixturesList.length,
+
+    message,
 
     diagnostics,
 
@@ -817,8 +909,7 @@ async function scores(
 ) {
 
   /*
-    Keep existing LATEST_SCORES
-    behaviour.
+     Keep existing cached score system.
   */
 
   if (
@@ -853,7 +944,7 @@ async function scores(
 
 
   /*
-    API-Football fallback.
+     API-Football fallback.
   */
 
   try {
@@ -1259,7 +1350,7 @@ async function health(env) {
       "YepFootball API",
 
     version:
-      "2026-09-22.3",
+      "2026-09-22.4",
 
     date:
       todayUTC(),
@@ -1276,14 +1367,11 @@ async function health(env) {
         !!env.API_FOOTBALL_KEY
     },
 
-
-    fixtureSource:
-      "football-data.org",
-
-
     scoreSource:
       "API-Football",
 
+    fixtureSource:
+      "football-data.org",
 
     competitions:
       COMPETITIONS.map(
@@ -1303,7 +1391,6 @@ async function health(env) {
         })
       ),
 
-
     endpoints: [
 
       "/api/scores",
@@ -1319,7 +1406,6 @@ async function health(env) {
       "/api/health"
 
     ],
-
 
     updated:
       new Date().toISOString()
