@@ -1,464 +1,566 @@
-/* =====================================================
-   YepFootball - Frontend
-   Scores / Fixtures / BBC News
-===================================================== */
+/* =========================================================
+   YepFootball Frontend
+   ========================================================= */
 
+const LEAGUES = [
 
-/* =====================================================
-   LEAGUES
-===================================================== */
-
-const leagues = {
-
-  all: {
-    name: "All Europe",
-    id: null
+  {
+    id: null,
+    code: "ALL",
+    name: "All"
   },
 
-  ucl: {
-    name: "Champions League",
-    id: 2
+  {
+    id: 2,
+    code: "CL",
+    name: "Champions League"
   },
 
-  europa: {
-    name: "Europa League",
-    id: 3
+  {
+    id: 3,
+    code: "EL",
+    name: "Europa League"
   },
 
-  conference: {
-    name: "Conference League",
-    id: 848
+  {
+    id: 848,
+    code: "ECL",
+    name: "Conference League"
   },
 
-  epl: {
-    name: "Premier League",
-    id: 39
+  {
+    id: 39,
+    code: "PL",
+    name: "Premier League"
   },
 
-  laliga: {
-    name: "La Liga",
-    id: 140
+  {
+    id: 140,
+    code: "PD",
+    name: "La Liga"
   },
 
-  seriea: {
-    name: "Serie A",
-    id: 135
+  {
+    id: 135,
+    code: "SA",
+    name: "Serie A"
   },
 
-  bundesliga: {
-    name: "Bundesliga",
-    id: 78
+  {
+    id: 78,
+    code: "BL1",
+    name: "Bundesliga"
   },
 
-  ligue1: {
-    name: "Ligue 1",
-    id: 61
+  {
+    id: 61,
+    code: "FL1",
+    name: "Ligue 1"
   }
-
-};
-
-
-/* =====================================================
-   STATE
-===================================================== */
-
-let selected = "all";
+];
 
 
-/* =====================================================
+let currentLeague =
+  null;
+
+
+/* =========================================================
    HELPERS
-===================================================== */
+   ========================================================= */
 
-const $ = selector =>
-  document.querySelector(selector);
+function escapeHTML(value) {
 
-
-function esc(value) {
-
-  return String(value ?? "")
+  return String(
+    value ?? ""
+  )
     .replace(
-      /[&<>"']/g,
-      character => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#39;"
-      }[character])
+      /&/g,
+      "&amp;"
+    )
+    .replace(
+      /</g,
+      "&lt;"
+    )
+    .replace(
+      />/g,
+      "&gt;"
+    )
+    .replace(
+      /"/g,
+      "&quot;"
+    )
+    .replace(
+      /'/g,
+      "&#039;"
     );
-
 }
 
 
-function fmtDate(value) {
+function formatDate(
+  date
+) {
 
-  try {
-
-    return new Date(value)
-      .toLocaleString(
-        undefined,
-        {
-          weekday: "short",
-          day: "numeric",
-          month: "short",
-          hour: "2-digit",
-          minute: "2-digit"
-        }
-      );
-
+  if (!date) {
+    return "";
   }
 
-  catch {
 
-    return value;
+  const d =
+    new Date(date);
 
+
+  if (
+    Number.isNaN(
+      d.getTime()
+    )
+  ) {
+    return "";
   }
 
+
+  return d.toLocaleDateString(
+    "en-GB",
+    {
+      weekday:
+        "short",
+
+      day:
+        "numeric",
+
+      month:
+        "short"
+    }
+  );
 }
 
 
-function fmtNewsDate(value) {
+function formatTime(
+  date
+) {
 
-  try {
-
-    return new Date(value)
-      .toLocaleString(
-        undefined,
-        {
-          weekday: "short",
-          day: "numeric",
-          month: "short",
-          hour: "2-digit",
-          minute: "2-digit"
-        }
-      );
-
+  if (!date) {
+    return "";
   }
 
-  catch {
 
-    return value || "Latest";
+  const d =
+    new Date(date);
 
+
+  if (
+    Number.isNaN(
+      d.getTime()
+    )
+  ) {
+    return "";
   }
 
+
+  return d.toLocaleTimeString(
+    "en-GB",
+    {
+      hour:
+        "2-digit",
+
+      minute:
+        "2-digit"
+    }
+  );
 }
 
 
-async function getJSON(url) {
-
-  const response =
-    await fetch(
-      url,
-      {
-        headers: {
-          "Accept": "application/json"
-        }
-      }
-    );
-
+function safeJSON(
+  response
+) {
 
   if (!response.ok) {
 
     throw new Error(
       `HTTP ${response.status}`
     );
-
   }
-
 
   return response.json();
-
 }
 
 
-/* =====================================================
-   TEAM CREST
-===================================================== */
+/* =========================================================
+   YEAR
+   ========================================================= */
 
-function crestHTML(
-  crest,
-  teamName
-) {
+const year =
+  document.getElementById(
+    "year"
+  );
 
-  if (!crest) {
+if (year) {
 
-    return "";
-
-  }
-
-
-  return `
-    <img
-      class="team-crest"
-      src="${esc(crest)}"
-      alt="${esc(teamName)} crest"
-      loading="lazy"
-      referrerpolicy="no-referrer"
-      onerror="this.style.display='none'"
-    >
-  `;
-
+  year.textContent =
+    new Date()
+      .getFullYear();
 }
 
 
-/* =====================================================
+/* =========================================================
    LEAGUE TABS
-===================================================== */
+   ========================================================= */
 
-function tabs() {
+function renderLeagueTabs() {
 
   const container =
-    $("#league-tabs");
+    document.getElementById(
+      "league-tabs"
+    );
 
 
   if (!container) {
-
     return;
-
   }
 
 
   container.innerHTML =
-    Object.entries(leagues)
-      .map(
-        ([key, league]) =>
+    LEAGUES.map(
+      league => {
 
-          `
+        const active =
+          league.id ===
+          currentLeague
+            ? " active"
+            : "";
+
+
+        return `
           <button
-            class="tab ${key === selected ? "active" : ""}"
-            data-league="${esc(key)}"
-            type="button"
+            class="tab${active}"
+            data-league-id="${league.id ?? ""}"
           >
-            ${esc(league.name)}
+            ${escapeHTML(
+              league.name
+            )}
           </button>
-          `
-      )
-      .join("");
+        `;
+      }
+    ).join("");
 
 
   container
-    .querySelectorAll(".tab")
-    .forEach(button => {
+    .querySelectorAll(
+      ".tab"
+    )
+    .forEach(
+      button => {
 
-      button.onclick = () => {
+        button.addEventListener(
+          "click",
+          () => {
 
-        selected =
-          button.dataset.league;
+            const value =
+              button.dataset.leagueId;
 
-        tabs();
 
-        loadScores();
+            currentLeague =
+              value === ""
+                ? null
+                : Number(value);
 
-      };
 
-    });
+            renderLeagueTabs();
 
+            loadScores();
+          }
+        );
+      }
+    );
 }
 
 
-/* =====================================================
-   LATEST SCORES
-===================================================== */
+renderLeagueTabs();
 
-function eventCard(e) {
+
+/* =========================================================
+   SCORE CARD
+   ========================================================= */
+
+function scoreCard(
+  match
+) {
 
   const home =
-    e.homeTeam?.shortName ||
-    e.homeTeam?.name ||
-    "Home";
-
+    match.homeTeam ||
+    {};
 
   const away =
-    e.awayTeam?.shortName ||
-    e.awayTeam?.name ||
-    "Away";
+    match.awayTeam ||
+    {};
+
+
+  const status =
+    match.status ||
+    "";
+
+
+  let statusText =
+    status;
+
+
+  if (
+    status === "FT"
+  ) {
+
+    statusText =
+      "FT";
+
+  } else if (
+    [
+      "1H",
+      "2H",
+      "HT",
+      "ET",
+      "P"
+    ].includes(status)
+  ) {
+
+    statusText =
+      "LIVE";
+  }
 
 
   const homeScore =
-    e.score?.home ??
-    e.homeScore ??
-    "-";
+    match.homeScore ??
+    "–";
 
 
   const awayScore =
-    e.score?.away ??
-    e.awayScore ??
-    "-";
-
-
-  const state =
-    e.statusLong ||
-    e.status ||
-    "Full Time";
+    match.awayScore ??
+    "–";
 
 
   return `
-
     <article class="score-card">
 
-      <div class="score-meta">
+      <div class="card-top">
 
         <span>
-          ${esc(
-            e.league ||
-            "Football"
+          ${escapeHTML(
+            match.league ||
+            ""
           )}
         </span>
 
-        <span>
-          ${esc(state)}
-        </span>
+        <b>
+          ${escapeHTML(
+            statusText
+          )}
+        </b>
 
       </div>
 
+      <div class="match-time">
+        ${escapeHTML(
+          formatTime(
+            match.date
+          )
+        )}
+      </div>
 
       <div class="teams">
 
-        <span>
-          ${crestHTML(
-            e.homeTeam?.crest,
-            home
+        <div class="team">
+
+          ${
+            home.crest
+              ? `
+                <img
+                  src="${escapeHTML(
+                    home.crest
+                  )}"
+                  alt=""
+                  loading="lazy"
+                >
+              `
+              : `
+                <span class="team-badge">
+                  ⚽
+                </span>
+              `
+          }
+
+          <strong>
+            ${escapeHTML(
+              home.shortName ||
+              home.name
+            )}
+          </strong>
+
+        </div>
+
+        <div class="score">
+          ${escapeHTML(
+            homeScore
           )}
-
-          ${esc(home)}
-        </span>
-
-
-        <strong class="score">
-          ${esc(homeScore)}
-          —
-          ${esc(awayScore)}
-        </strong>
-
-
-        <span>
-          ${esc(away)}
-
-          ${crestHTML(
-            e.awayTeam?.crest,
-            away
+          <span>–</span>
+          ${escapeHTML(
+            awayScore
           )}
-        </span>
+        </div>
+
+        <div class="team">
+
+          ${
+            away.crest
+              ? `
+                <img
+                  src="${escapeHTML(
+                    away.crest
+                  )}"
+                  alt=""
+                  loading="lazy"
+                >
+              `
+              : `
+                <span class="team-badge">
+                  ⚽
+                </span>
+              `
+          }
+
+          <strong>
+            ${escapeHTML(
+              away.shortName ||
+              away.name
+            )}
+          </strong>
+
+        </div>
 
       </div>
 
     </article>
-
   `;
-
 }
 
 
-/* =====================================================
-   LOAD LATEST SCORES
-===================================================== */
+/* =========================================================
+   LOAD SCORES
+   ========================================================= */
 
 async function loadScores() {
 
-  const status =
-    $("#scores-status");
-
-
   const grid =
-    $("#scores-grid");
+    document.getElementById(
+      "scores-grid"
+    );
+
+  const status =
+    document.getElementById(
+      "scores-status"
+    );
 
 
   if (!grid) {
-
     return;
-
-  }
-
-
-  if (status) {
-
-    status.textContent =
-      "Loading…";
-
   }
 
 
   try {
 
+    const response =
+      await fetch(
+        "/api/scores",
+        {
+          cache:
+            "no-store"
+        }
+      );
+
+
     const data =
-      await getJSON(
-        "/api/scores"
+      await safeJSON(
+        response
       );
 
 
     let events =
-      data.events || [];
+      data.events ||
+      [];
 
+
+    /*
+      Filter by selected competition.
+    */
 
     if (
-      selected !== "all"
+      currentLeague !== null
     ) {
-
-      const leagueId =
-        leagues[selected].id;
-
 
       events =
         events.filter(
-          event =>
-            Number(event.leagueId) ===
-            Number(leagueId)
+          match =>
+            Number(
+              match.leagueId
+            ) ===
+            currentLeague
         );
-
     }
 
 
-    grid.innerHTML =
+    if (
+      events.length === 0
+    ) {
 
-      events.length
-
-        ? events
-            .map(eventCard)
-            .join("")
-
-        : `
+      grid.innerHTML =
+        `
           <div class="empty">
-            No matches found for this competition.
+            No matches found today.
           </div>
         `;
+
+    } else {
+
+      grid.innerHTML =
+        events
+          .map(
+            scoreCard
+          )
+          .join("");
+    }
 
 
     if (status) {
 
-      if (data.publishedAt) {
-
-        status.textContent =
-          `Last updated ${new Date(
-            data.publishedAt
-          ).toLocaleTimeString(
-            [],
-            {
-              hour: "2-digit",
-              minute: "2-digit"
-            }
-          )}`;
-
-      }
-
-      else {
-
-        status.textContent =
-          `Updated ${new Date()
-            .toLocaleTimeString(
-              [],
-              {
-                hour: "2-digit",
-                minute: "2-digit"
-              }
-            )}`;
-
-      }
-
+      status.textContent =
+        `${events.length} match${
+          events.length === 1
+            ? ""
+            : "es"
+        }`;
     }
 
-  }
 
-  catch (error) {
+    const updated =
+      document.getElementById(
+        "updated"
+      );
+
+
+    if (updated) {
+
+      updated.textContent =
+        `Updated ${new Date()
+          .toLocaleTimeString(
+            "en-GB",
+            {
+              hour:
+                "2-digit",
+
+              minute:
+                "2-digit"
+            }
+          )}`;
+    }
+
+
+  } catch (error) {
 
     console.error(
       "Scores error:",
@@ -469,8 +571,7 @@ async function loadScores() {
     grid.innerHTML =
       `
         <div class="empty">
-          Scores are temporarily unavailable.
-          Please try again shortly.
+          Unable to load scores.
         </div>
       `;
 
@@ -478,284 +579,265 @@ async function loadScores() {
     if (status) {
 
       status.textContent =
-        "Feed unavailable";
-
+        "Error";
     }
-
   }
-
 }
 
 
-/* =====================================================
+/* =========================================================
    FIXTURE CARD
-===================================================== */
+   ========================================================= */
 
-function fixtureCard(e) {
+function fixtureCard(
+  match
+) {
 
   const home =
-    e.homeTeam?.shortName ||
-    e.homeTeam?.name ||
-    "Home";
-
+    match.homeTeam ||
+    {};
 
   const away =
-    e.awayTeam?.shortName ||
-    e.awayTeam?.name ||
-    "Away";
-
-
-  const homeCrest =
-    e.homeTeam?.crest ||
-    "";
-
-
-  const awayCrest =
-    e.awayTeam?.crest ||
-    "";
-
-
-  const league =
-    e.league ||
-    "European football";
+    match.awayTeam ||
+    {};
 
 
   return `
-
     <article class="fixture-card">
 
-      <div class="fixture-date">
-        ${esc(
-          fmtDate(e.date)
-        )}
+      <div class="fixture-top">
+
+        <span>
+          ${escapeHTML(
+            match.league ||
+            ""
+          )}
+        </span>
+
+        <span>
+          ${escapeHTML(
+            formatDate(
+              match.date
+            )
+          )}
+        </span>
+
       </div>
 
+      <div class="fixture-time">
+
+        ${escapeHTML(
+          formatTime(
+            match.date
+          )
+        )}
+
+      </div>
 
       <div class="fixture-teams">
 
-        <span class="fixture-team home-team">
+        <div class="fixture-team">
 
-          ${crestHTML(
-            homeCrest,
-            home
-          )}
+          ${
+            home.crest
+              ? `
+                <img
+                  src="${escapeHTML(
+                    home.crest
+                  )}"
+                  alt=""
+                  loading="lazy"
+                >
+              `
+              : `
+                <span class="team-badge">
+                  ⚽
+                </span>
+              `
+          }
 
           <strong>
-            ${esc(home)}
+            ${escapeHTML(
+              home.name
+            )}
           </strong>
 
-        </span>
+        </div>
 
+        <div class="vs">
+          VS
+        </div>
 
-        <strong class="fixture-vs">
-          vs
-        </strong>
+        <div class="fixture-team">
 
-
-        <span class="fixture-team away-team">
+          ${
+            away.crest
+              ? `
+                <img
+                  src="${escapeHTML(
+                    away.crest
+                  )}"
+                  alt=""
+                  loading="lazy"
+                >
+              `
+              : `
+                <span class="team-badge">
+                  ⚽
+                </span>
+              `
+          }
 
           <strong>
-            ${esc(away)}
+            ${escapeHTML(
+              away.name
+            )}
           </strong>
 
-          ${crestHTML(
-            awayCrest,
-            away
-          )}
+        </div>
 
-        </span>
-
-      </div>
-
-
-      <div class="fixture-league">
-        ${esc(league)}
       </div>
 
     </article>
-
   `;
-
 }
 
 
-/* =====================================================
+/* =========================================================
    LOAD FIXTURES
-===================================================== */
+   ========================================================= */
 
 async function loadFixtures() {
 
   const grid =
-    $("#fixtures-grid");
-
-  const message =
-    $("#fixtures-message");
-
-  const windowLabel =
-    $("#fixtures-window");
+    document.getElementById(
+      "fixtures-grid"
+    );
 
 
   if (!grid) {
-
     return;
-
-  }
-
-
-  /*
-     Initial message
-  */
-
-  if (message) {
-
-    message.textContent =
-      "Checking upcoming fixtures…";
-
-  }
-
-
-  if (windowLabel) {
-
-    windowLabel.textContent =
-      "Automatic";
-
   }
 
 
   try {
 
-    const data =
-      await getJSON(
-        "/api/fixtures"
+    /*
+      IMPORTANT:
+      New endpoint deliberately bypasses
+      the old /api/fixtures cache.
+    */
+
+    const response =
+      await fetch(
+        "/api/fixtures-v2",
+        {
+          cache:
+            "no-store"
+        }
       );
 
 
-    const events =
-      Array.isArray(data.fixtures)
-        ? data.fixtures
-        : (
-            Array.isArray(data.events)
-              ? data.events
-              : []
-          );
+    const data =
+      await safeJSON(
+        response
+      );
+
+
+    const fixtures =
+      data.fixtures ||
+      data.events ||
+      [];
 
 
     /*
-       We now expect the API to return
-       the next available fixtures even
-       when the current 7-day period is empty.
+      Optional message element.
     */
 
-    if (events.length) {
-
-      grid.innerHTML =
-        events
-          .map(fixtureCard)
-          .join("");
+    const message =
+      document.getElementById(
+        "fixtures-message"
+      );
 
 
-      if (message) {
-
-        if (
-          data.isNextAvailable ||
-          data.mode === "next"
-        ) {
-
-          message.textContent =
-            "No fixtures during the current period. Showing the next available matches.";
-
-        }
-
-        else {
-
-          message.textContent =
-            "Upcoming European fixtures.";
-
-        }
-
-      }
-
-
-      if (windowLabel) {
-
-        if (
-          data.from &&
-          data.to
-        ) {
-
-          const from =
-            new Date(
-              `${data.from}T12:00:00`
-            );
-
-
-          const to =
-            new Date(
-              `${data.to}T12:00:00`
-            );
-
-
-          windowLabel.textContent =
-            `${from.toLocaleDateString(
-              undefined,
-              {
-                day: "numeric",
-                month: "short"
-              }
-            )} – ${to.toLocaleDateString(
-              undefined,
-              {
-                day: "numeric",
-                month: "short"
-              }
-            )}`;
-
-        }
-
-        else {
-
-          windowLabel.textContent =
-            "Next available";
-
-        }
-
-      }
-
-      return;
-
-    }
-
-
-    /*
-       No fixtures returned at all.
-    */
-
-    grid.innerHTML =
-      `
-        <div class="empty">
-          No upcoming European fixtures are currently available.
-        </div>
-      `;
+    const windowElement =
+      document.getElementById(
+        "fixtures-window"
+      );
 
 
     if (message) {
 
-      message.textContent =
-        "The next fixture information is not currently available.";
+      if (
+        data.message
+      ) {
 
+        message.textContent =
+          data.message;
+
+        message.style.display =
+          "block";
+
+      } else {
+
+        message.textContent =
+          "";
+
+        message.style.display =
+          "none";
+      }
     }
 
 
-    if (windowLabel) {
+    if (windowElement) {
 
-      windowLabel.textContent =
-        "Automatic";
+      if (
+        data.from &&
+        data.to
+      ) {
 
+        windowElement.textContent =
+          `${formatDate(
+            data.from
+          )} – ${formatDate(
+            data.to
+          )}`;
+
+      } else {
+
+        windowElement.textContent =
+          "";
+      }
     }
 
-  }
 
-  catch (error) {
+    if (
+      fixtures.length === 0
+    ) {
+
+      grid.innerHTML =
+        `
+          <div class="empty">
+            ${
+              data.message ||
+              "No upcoming fixtures found."
+            }
+          </div>
+        `;
+
+      return;
+    }
+
+
+    grid.innerHTML =
+      fixtures
+        .map(
+          fixtureCard
+        )
+        .join("");
+
+
+  } catch (error) {
 
     console.error(
       "Fixtures error:",
@@ -766,177 +848,138 @@ async function loadFixtures() {
     grid.innerHTML =
       `
         <div class="empty">
-          Fixtures are temporarily unavailable.
+          Unable to load fixtures.
         </div>
       `;
-
-
-    if (message) {
-
-      message.textContent =
-        "Unable to load the fixture feed.";
-
-    }
-
-
-    if (windowLabel) {
-
-      windowLabel.textContent =
-        "Feed unavailable";
-
-    }
-
   }
-
 }
 
 
-/* =====================================================
-   BBC NEWS CARD
-===================================================== */
+/* =========================================================
+   NEWS CARD
+   ========================================================= */
 
-function newsCard(article) {
+function newsCard(
+  article
+) {
 
-  const image =
-    article.image ||
+  const title =
+    article.title ||
+    "Football news";
+
+
+  const description =
+    article.description ||
     "";
 
 
-  const imageHTML =
-    image
-
-      ? `
-        <img
-          class="news-image"
-          src="${esc(image)}"
-          alt="${esc(article.title)}"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onerror="this.style.display='none'"
-        >
-        `
-
-      : "";
+  const link =
+    article.link ||
+    "#";
 
 
   return `
+    <article class="news-card">
 
-    <a
-      class="news-card"
-      href="${esc(article.link)}"
-      target="_blank"
-      rel="noopener"
-    >
-
-      ${imageHTML}
-
-
-      <div class="news-content">
-
-        <div>
-
-          <small>
-            ${esc(
-              article.source ||
-              "BBC Sport"
-            )}
-          </small>
-
-
-          <h3>
-            ${esc(
-              article.title
-            )}
-          </h3>
-
-
-          ${
-            article.description
-              ? `
-                <p class="news-description">
-                  ${esc(
-                    article.description
-                  )}
-                </p>
-              `
-              : ""
-          }
-
-        </div>
-
-
-        <span class="source">
-
-          ${
-            article.published ||
-            article.date
-              ? esc(
-                  fmtNewsDate(
-                    article.published ||
-                    article.date
-                  )
-                )
-              : "Latest"
-          }
-
-        </span>
-
+      <div class="news-meta">
+        BBC SPORT
       </div>
 
-    </a>
+      <h3>
+        <a
+          href="${escapeHTML(
+            link
+          )}"
+          target="_blank"
+          rel="noopener"
+        >
+          ${escapeHTML(
+            title
+          )}
+        </a>
+      </h3>
 
+      ${
+        description
+          ? `
+            <p>
+              ${escapeHTML(
+                description
+              )}
+            </p>
+          `
+          : ""
+      }
+
+    </article>
   `;
-
 }
 
 
-/* =====================================================
-   LOAD BBC NEWS
-===================================================== */
+/* =========================================================
+   LOAD NEWS
+   ========================================================= */
 
 async function loadNews() {
 
   const grid =
-    $("#news-grid");
+    document.getElementById(
+      "news-grid"
+    );
 
 
   if (!grid) {
-
     return;
-
   }
 
 
   try {
 
+    const response =
+      await fetch(
+        "/api/news",
+        {
+          cache:
+            "no-store"
+        }
+      );
+
+
     const data =
-      await getJSON(
-        "/api/news"
+      await safeJSON(
+        response
       );
 
 
     const articles =
-      data.articles || [];
+      data.articles ||
+      [];
 
 
-    grid.innerHTML =
+    if (
+      articles.length === 0
+    ) {
 
-      articles.length
-
-        ? articles
-            .slice(0, 9)
-            .map(newsCard)
-            .join("")
-
-        : `
+      grid.innerHTML =
+        `
           <div class="empty">
-            No news available right now.
+            No news available.
           </div>
         `;
 
-  }
+      return;
+    }
 
-  catch (error) {
+
+    grid.innerHTML =
+      articles
+        .map(
+          newsCard
+        )
+        .join("");
+
+
+  } catch (error) {
 
     console.error(
       "News error:",
@@ -947,107 +990,47 @@ async function loadNews() {
     grid.innerHTML =
       `
         <div class="empty">
-          News feed is temporarily unavailable.
+          Unable to load news.
         </div>
       `;
-
   }
-
 }
 
 
-/* =====================================================
-   PAGE UPDATE TIME
-===================================================== */
-
-function updatePageTime() {
-
-  const element =
-    $("#updated");
-
-
-  if (!element) {
-
-    return;
-
-  }
-
-
-  element.textContent =
-    `Last checked ${new Date()
-      .toLocaleTimeString(
-        [],
-        {
-          hour: "2-digit",
-          minute: "2-digit"
-        }
-      )}`;
-
-}
-
-
-/* =====================================================
-   START APPLICATION
-===================================================== */
+/* =========================================================
+   INITIAL LOAD
+   ========================================================= */
 
 document.addEventListener(
   "DOMContentLoaded",
   () => {
-
-    tabs();
-
-
-    const year =
-      $("#year");
-
-
-    if (year) {
-
-      year.textContent =
-        new Date().getFullYear();
-
-    }
-
 
     loadScores();
 
     loadFixtures();
 
     loadNews();
-
-    updatePageTime();
-
-
-    /* Scores every 2 minutes */
-
-    setInterval(
-      loadScores,
-      120000
-    );
-
-
-    /* Fixtures every 15 minutes */
-
-    setInterval(
-      loadFixtures,
-      900000
-    );
-
-
-    /* News every 30 minutes */
-
-    setInterval(
-      loadNews,
-      1800000
-    );
-
-
-    /* Page time every minute */
-
-    setInterval(
-      updatePageTime,
-      60000
-    );
-
   }
+);
+
+
+/* =========================================================
+   AUTOMATIC REFRESH
+   ========================================================= */
+
+setInterval(
+  loadScores,
+  2 * 60 * 1000
+);
+
+
+setInterval(
+  loadFixtures,
+  15 * 60 * 1000
+);
+
+
+setInterval(
+  loadNews,
+  30 * 60 * 1000
 );
