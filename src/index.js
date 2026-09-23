@@ -1414,7 +1414,7 @@ async function health(env) {
       "YepFootball API",
 
     version:
-      "2026-09-23.1",
+      "2026-09-23.2",
 
     date:
       todayUTC(),
