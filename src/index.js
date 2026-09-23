@@ -266,3 +266,6 @@ async function videos(request) {
     }
   );
 }
+export default {
+  fetch: handle
+};
