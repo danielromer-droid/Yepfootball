@@ -1,63 +1,62 @@
 /* =========================================================
    YepFootball Frontend
+   Clean frontend version
+   Scores + Fixtures + BBC News
+   ========================================================= */
+
+
+/* =========================================================
+   SUPPORTED LEAGUES
    ========================================================= */
 
 const LEAGUES = [
-
   {
     id: null,
     code: "ALL",
     name: "All"
   },
-
   {
     id: 2,
     code: "CL",
     name: "Champions League"
   },
-
   {
     id: 3,
     code: "EL",
     name: "Europa League"
   },
-
   {
     id: 848,
     code: "ECL",
     name: "Conference League"
   },
-
   {
     id: 39,
     code: "PL",
     name: "Premier League"
   },
-
   {
     id: 140,
     code: "PD",
     name: "La Liga"
   },
-
   {
     id: 135,
     code: "SA",
     name: "Serie A"
   },
-
   {
     id: 78,
     code: "BL1",
     name: "Bundesliga"
   },
-
   {
     id: 61,
     code: "FL1",
     name: "Ligue 1"
   }
 ];
+
 
 const SCORE_LEAGUE_IDS = new Set(
   LEAGUES
@@ -66,8 +65,11 @@ const SCORE_LEAGUE_IDS = new Set(
 );
 
 
-let currentLeague =
-  null;
+/* =========================================================
+   CURRENT LEAGUE
+   ========================================================= */
+
+let currentLeague = null;
 
 
 /* =========================================================
@@ -76,111 +78,109 @@ let currentLeague =
 
 function escapeHTML(value) {
 
-  return String(
-    value ?? ""
-  )
-    .replace(
-      /&/g,
-      "&amp;"
-    )
-    .replace(
-      /</g,
-      "&lt;"
-    )
-    .replace(
-      />/g,
-      "&gt;"
-    )
-    .replace(
-      /"/g,
-      "&quot;"
-    )
-    .replace(
-      /'/g,
-      "&#039;"
-    );
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 
-function formatDate(
-  date
-) {
+/* ---------------------------------------------------------
+   Date formatter
+   --------------------------------------------------------- */
+
+function formatDate(date) {
 
   if (!date) {
     return "";
   }
 
+  const d = new Date(date);
 
-  const d =
-    new Date(date);
-
-
-  if (
-    Number.isNaN(
-      d.getTime()
-    )
-  ) {
+  if (Number.isNaN(d.getTime())) {
     return "";
   }
-
 
   return d.toLocaleDateString(
     "en-GB",
     {
-      weekday:
-        "short",
-
-      day:
-        "numeric",
-
-      month:
-        "short"
+      weekday: "short",
+      day: "numeric",
+      month: "short"
     }
   );
 }
 
 
-function formatTime(
-  date
-) {
+/* ---------------------------------------------------------
+   Long date
+   --------------------------------------------------------- */
+
+function formatLongDate(date) {
 
   if (!date) {
     return "";
   }
 
+  const d = new Date(date);
 
-  const d =
-    new Date(date);
-
-
-  if (
-    Number.isNaN(
-      d.getTime()
-    )
-  ) {
+  if (Number.isNaN(d.getTime())) {
     return "";
   }
 
-
-  return d.toLocaleTimeString(
+  return d.toLocaleDateString(
     "en-GB",
     {
-      hour:
-        "2-digit",
-
-      minute:
-        "2-digit"
+      day: "numeric",
+      month: "long",
+      year: "numeric"
     }
   );
 }
 
 
-function safeJSON(
-  response
-) {
+/* ---------------------------------------------------------
+   Time formatter
+   --------------------------------------------------------- */
+
+function formatTime(date) {
+
+  if (!date) {
+    return "";
+  }
+
+  const d = new Date(date);
+
+  if (Number.isNaN(d.getTime())) {
+    return "";
+  }
+
+  return d.toLocaleTimeString(
+    "en-GB",
+    {
+      hour: "2-digit",
+      minute: "2-digit"
+    }
+  );
+}
+
+
+/* ---------------------------------------------------------
+   API JSON helper
+   --------------------------------------------------------- */
+
+async function fetchJSON(url) {
+
+  const response = await fetch(
+    url,
+    {
+      cache: "no-store"
+    }
+  );
 
   if (!response.ok) {
-
     throw new Error(
       `HTTP ${response.status}`
     );
@@ -194,16 +194,16 @@ function safeJSON(
    YEAR
    ========================================================= */
 
-const year =
-  document.getElementById(
-    "year"
-  );
+function updateYear() {
 
-if (year) {
+  const year =
+    document.getElementById("year");
 
-  year.textContent =
-    new Date()
-      .getFullYear();
+  if (year) {
+
+    year.textContent =
+      new Date().getFullYear();
+  }
 }
 
 
@@ -214,35 +214,28 @@ if (year) {
 function renderLeagueTabs() {
 
   const container =
-    document.getElementById(
-      "league-tabs"
-    );
-
+    document.getElementById("league-tabs");
 
   if (!container) {
     return;
   }
-
 
   container.innerHTML =
     LEAGUES.map(
       league => {
 
         const active =
-          league.id ===
-          currentLeague
+          league.id === currentLeague
             ? " active"
             : "";
 
-
         return `
           <button
+            type="button"
             class="tab${active}"
             data-league-id="${league.id ?? ""}"
           >
-            ${escapeHTML(
-              league.name
-            )}
+            ${escapeHTML(league.name)}
           </button>
         `;
       }
@@ -250,9 +243,7 @@ function renderLeagueTabs() {
 
 
   container
-    .querySelectorAll(
-      ".tab"
-    )
+    .querySelectorAll(".tab")
     .forEach(
       button => {
 
@@ -263,12 +254,10 @@ function renderLeagueTabs() {
             const value =
               button.dataset.leagueId;
 
-
             currentLeague =
               value === ""
                 ? null
                 : Number(value);
-
 
             renderLeagueTabs();
 
@@ -280,43 +269,28 @@ function renderLeagueTabs() {
 }
 
 
-renderLeagueTabs();
-
-
 /* =========================================================
-   SCORE CARD
+   SCORE STATUS TEXT
    ========================================================= */
 
-function scoreCard(
-  match
-) {
-
-  const home =
-    match.homeTeam ||
-    {};
-
-  const away =
-    match.awayTeam ||
-    {};
-
+function getScoreStatusText(match) {
 
   const status =
-    match.status ||
-    "";
-
-
-  let statusText =
-    status;
+    String(match?.status || "")
+      .toUpperCase();
 
 
   if (
-    status === "FT"
+    status === "FINISHED" ||
+    status === "FT" ||
+    status === "AET" ||
+    status === "PEN"
   ) {
+    return "FT";
+  }
 
-    statusText =
-      "FT";
 
-  } else if (
+  if (
     [
       "1H",
       "2H",
@@ -325,10 +299,45 @@ function scoreCard(
       "P"
     ].includes(status)
   ) {
-
-    statusText =
-      "LIVE";
+    return "LIVE";
   }
+
+
+  if (
+    status === "TIMED" ||
+    status === "NS"
+  ) {
+    return "UPCOMING";
+  }
+
+
+  return status || "";
+}
+
+
+/* =========================================================
+   SCORE CARD
+   ========================================================= */
+
+function scoreCard(match) {
+
+  const home =
+    match.homeTeam || {};
+
+  const away =
+    match.awayTeam || {};
+
+
+  const homeName =
+    home.shortName ||
+    home.name ||
+    "Home";
+
+
+  const awayName =
+    away.shortName ||
+    away.name ||
+    "Away";
 
 
   const homeScore =
@@ -341,6 +350,10 @@ function scoreCard(
     "–";
 
 
+  const status =
+    getScoreStatusText(match);
+
+
   return `
     <article class="score-card">
 
@@ -348,28 +361,30 @@ function scoreCard(
 
         <span>
           ${escapeHTML(
-            match.league ||
-            ""
+            match.league || ""
           )}
         </span>
 
         <b>
-          ${escapeHTML(
-            statusText
-          )}
+          ${escapeHTML(status)}
         </b>
 
       </div>
 
+
       <div class="match-time">
+
         ${escapeHTML(
-          formatTime(
-            match.date
-          )
+          formatTime(match.date)
         )}
+
       </div>
 
+
       <div class="teams">
+
+
+        <!-- HOME -->
 
         <div class="team">
 
@@ -377,9 +392,7 @@ function scoreCard(
             home.crest
               ? `
                 <img
-                  src="${escapeHTML(
-                    home.crest
-                  )}"
+                  src="${escapeHTML(home.crest)}"
                   alt=""
                   loading="lazy"
                 >
@@ -392,23 +405,32 @@ function scoreCard(
           }
 
           <strong>
-            ${escapeHTML(
-              home.shortName ||
-              home.name
-            )}
+            ${escapeHTML(homeName)}
           </strong>
 
         </div>
 
+
+        <!-- SCORE -->
+
         <div class="score">
-          ${escapeHTML(
-            homeScore
-          )}
-          <span>–</span>
-          ${escapeHTML(
-            awayScore
-          )}
+
+          <span>
+            ${escapeHTML(homeScore)}
+          </span>
+
+          <span>
+            –
+          </span>
+
+          <span>
+            ${escapeHTML(awayScore)}
+          </span>
+
         </div>
+
+
+        <!-- AWAY -->
 
         <div class="team">
 
@@ -416,9 +438,7 @@ function scoreCard(
             away.crest
               ? `
                 <img
-                  src="${escapeHTML(
-                    away.crest
-                  )}"
+                  src="${escapeHTML(away.crest)}"
                   alt=""
                   loading="lazy"
                 >
@@ -431,10 +451,7 @@ function scoreCard(
           }
 
           <strong>
-            ${escapeHTML(
-              away.shortName ||
-              away.name
-            )}
+            ${escapeHTML(awayName)}
           </strong>
 
         </div>
@@ -447,62 +464,243 @@ function scoreCard(
 
 
 /* =========================================================
-   LOAD SCORES
+   SCORE LEAGUE HEADING
    ========================================================= */
 
-function scoreDayHeading(
-  label,
+function scoreLeagueHeading(
+  leagueName,
   date
 ) {
 
-  let title = label;
-
-  if (date) {
-    const d = new Date(`${date}T12:00:00Z`);
-
-    if (!Number.isNaN(d.getTime())) {
-      const formatted = d.toLocaleDateString(
-        "en-GB",
-        {
-          day: "2-digit",
-          month: "short"
-        }
-      );
-
-      title = `${label} · ${formatted}`;
-    }
-  }
-
   return `
     <div class="score-day-heading">
-      <span>${escapeHTML(title)}</span>
+
+      <span>
+        ${escapeHTML(leagueName)}
+      </span>
+
+      <small>
+        ${escapeHTML(
+          formatLongDate(date)
+        )}
+      </small>
+
     </div>
   `;
 }
 
 
-function renderScoreDay(
-  label,
-  date,
-  events
-) {
+/* =========================================================
+   GROUP SCORES BY LEAGUE
+   ========================================================= */
 
-  let html = scoreDayHeading(label, date);
+function groupScoresByLeague(events) {
 
-  if (!events.length) {
-    html += `
-      <div class="empty score-day-empty">
-        No matches available in the selected competitions.
-      </div>
-    `;
-    return html;
+  const groups = new Map();
+
+
+  events.forEach(
+    match => {
+
+      const leagueId =
+        Number(match?.leagueId);
+
+
+      if (
+        !SCORE_LEAGUE_IDS.has(
+          leagueId
+        )
+      ) {
+        return;
+      }
+
+
+      if (
+        currentLeague !== null &&
+        leagueId !== currentLeague
+      ) {
+        return;
+      }
+
+
+      if (!groups.has(leagueId)) {
+
+        groups.set(
+          leagueId,
+          []
+        );
+      }
+
+
+      groups
+        .get(leagueId)
+        .push(match);
+
+    }
+  );
+
+
+  return groups;
+}
+
+
+/* =========================================================
+   SORT LEAGUES
+   ========================================================= */
+
+function leagueOrder(leagueId) {
+
+  const index =
+    LEAGUES.findIndex(
+      league =>
+        Number(league.id) ===
+        Number(leagueId)
+    );
+
+  return index < 0
+    ? 999
+    : index;
+}
+
+
+/* =========================================================
+   RENDER SCORES
+   ========================================================= */
+
+function renderScores(events) {
+
+  const grid =
+    document.getElementById(
+      "scores-grid"
+    );
+
+
+  if (!grid) {
+    return;
   }
 
-  html += events
-    .map(scoreCard)
-    .join("");
 
-  return html;
+  if (!events.length) {
+
+    grid.innerHTML = `
+      <div class="empty">
+        No scores available for the selected competition.
+      </div>
+    `;
+
+    return;
+  }
+
+
+  const groups =
+    groupScoresByLeague(events);
+
+
+  if (!groups.size) {
+
+    grid.innerHTML = `
+      <div class="empty">
+        No scores available for the selected competition.
+      </div>
+    `;
+
+    return;
+  }
+
+
+  const orderedGroups =
+    [...groups.entries()]
+      .sort(
+        (a, b) =>
+          leagueOrder(a[0]) -
+          leagueOrder(b[0])
+      );
+
+
+  let html = "";
+
+
+  orderedGroups.forEach(
+    ([leagueId, matches]) => {
+
+      const league =
+        LEAGUES.find(
+          item =>
+            Number(item.id) ===
+            Number(leagueId)
+        );
+
+
+      const leagueName =
+        league?.name ||
+        matches[0]?.league ||
+        "Football";
+
+
+      /*
+       * Find the latest date represented
+       * in this competition.
+       */
+
+      const dates =
+        matches
+          .map(
+            match =>
+              new Date(
+                match.date || 0
+              )
+          )
+          .filter(
+            date =>
+              !Number.isNaN(
+                date.getTime()
+              )
+          )
+          .sort(
+            (a, b) =>
+              b.getTime() -
+              a.getTime()
+          );
+
+
+      const latestDate =
+        dates.length
+          ? dates[0]
+          : null;
+
+
+      /*
+       * Sort matches chronologically.
+       */
+
+      matches.sort(
+        (a, b) =>
+          new Date(
+            a.date || 0
+          ) -
+          new Date(
+            b.date || 0
+          )
+      );
+
+
+      html +=
+        scoreLeagueHeading(
+          leagueName,
+          latestDate
+        );
+
+
+      html += matches
+        .map(scoreCard)
+        .join("");
+
+    }
+  );
+
+
+  grid.innerHTML =
+    html;
 }
 
 
@@ -513,254 +711,155 @@ function renderScoreDay(
 async function loadScores() {
 
   const grid =
-    document.getElementById("scores-grid");
+    document.getElementById(
+      "scores-grid"
+    );
+
 
   const status =
-    document.getElementById("scores-status");
+    document.getElementById(
+      "scores-status"
+    );
+
 
   if (!grid) {
     return;
   }
 
-  try {
-
-    const response =
-      await fetch(
-        "/api/scores",
-        {
-          cache: "no-store"
-        }
-      );
-
-    const data =
-      await safeJSON(response);
-
-    if (data.ok === false) {
-      throw new Error(
-        data.error ||
-        "Scores API returned an error"
-      );
-    }
-
-    let events =
-      Array.isArray(data.events)
-        ? data.events
-        : [];
-
-    /* Only display YepFootball's supported competitions. */
-    events = events.filter(
-      match =>
-        SCORE_LEAGUE_IDS.has(
-          Number(match?.leagueId)
-        )
-    );
-
-    /* Filter by selected competition. */
-    if (currentLeague !== null) {
-      events = events.filter(
-        match =>
-          Number(match.leagueId) ===
-          currentLeague
-      );
-    }
-
-async function scores(
-  request,
-  env
-) {
-
-  /*
-     Scores behaviour:
-       1. Always show live/finished/today results when available.
-       2. If there are no matches today or yesterday, automatically
-          fall back to the latest completed matchday available for
-          each supported European competition.
-
-     This prevents the Scores page from appearing empty during
-     international breaks or other gaps in the calendar.
-  */
 
   try {
-    const today = todayUTC();
-    const yesterday = addDays(today, -1);
-    const recentStart = addDays(today, -14);
-    const cacheUrl = new URL(request.url);
-    cacheUrl.pathname = "/api/scores-v20260923-latest";
-    cacheUrl.search = `?from=${recentStart}&to=${today}`;
-
-    const cache = caches.default;
-    const cached = await cache.match(cacheUrl);
-    if (cached) return cached;
-
-    const fetchRange = async (from, to) => {
-      try {
-        const result = await apiFootball(
-          `/fixtures?from=${from}&to=${to}`,
-          env
-        );
-        return Array.isArray(result.data?.response)
-          ? result.data.response
-          : [];
-      } catch {
-        return [];
-      }
-    };
-
-    const [recentFixtures, todayFixtures] = await Promise.all([
-      fetchRange(recentStart, yesterday),
-      fetchRange(today, today)
-    ]);
-
-    const allFixtures = [
-      ...recentFixtures,
-      ...todayFixtures
-    ].filter(item =>
-      SCORE_LEAGUE_IDS.has(Number(item?.league?.id))
-    );
-
-    const unique = new Map();
-    for (const item of allFixtures) {
-      const id = String(item?.fixture?.id || "");
-      if (id) unique.set(id, item);
-    }
-
-    const events = [];
-    for (const item of unique.values()) {
-      const competition = COMPETITIONS.find(
-        c => c.apiFootballId === Number(item?.league?.id)
-      ) || {
-        code: String(item?.league?.id || ""),
-        name: item?.league?.name || "Football",
-        apiFootballId: item?.league?.id || null
-      };
-
-      const date = String(item?.fixture?.date || "");
-      const scoreDate = date.slice(0, 10);
-      const event = {
-        ...normaliseApiFootballFixture(item, competition),
-        scoreDate,
-        scoreDay:
-          scoreDate === yesterday
-            ? "yesterday"
-            : scoreDate === today
-              ? "today"
-              : "recent"
-      };
-
-      events.push(event);
-    }
-
-    events.sort(
-      (a, b) => new Date(a.date || 0) - new Date(b.date || 0)
-    );
-
-    const live = events.filter(e =>
-      ["1H", "2H", "HT", "ET", "P"].includes(e?.status)
-    );
-
-    const finished = events.filter(e =>
-      ["FT", "AET", "PEN"].includes(e?.status)
-    );
-
-    const upcoming = events.filter(e =>
-      ["NS", "TBD"].includes(e?.status)
-    );
-
-    const yesterdayEvents = events.filter(
-      e => e.scoreDay === "yesterday"
-    );
-    const todayEvents = events.filter(
-      e => e.scoreDay === "today"
-    );
-
-    /*
-       Latest available results are calculated independently for each
-       competition. We take the most recent completed date in that
-       competition, then return every completed match from that date.
-    */
-    const latestDateByLeague = new Map();
-
-    for (const event of finished) {
-      const leagueId = Number(event?.leagueId);
-      const date = event?.scoreDate;
-      if (!leagueId || !date) continue;
-
-      const previous = latestDateByLeague.get(leagueId);
-      if (!previous || date > previous) {
-        latestDateByLeague.set(leagueId, date);
-      }
-    }
-
-    const latestAvailable = finished.filter(event =>
-      event?.scoreDate ===
-      latestDateByLeague.get(Number(event?.leagueId))
-    );
-
-    latestAvailable.sort((a, b) => {
-      const leagueA = Number(a?.leagueId || 0);
-      const leagueB = Number(b?.leagueId || 0);
-      if (leagueA !== leagueB) return leagueA - leagueB;
-      return new Date(a.date || 0) - new Date(b.date || 0);
-    });
-
-    const hasCurrent =
-      yesterdayEvents.length > 0 ||
-      todayEvents.length > 0;
-
-    const responseData = {
-      ok: true,
-      yesterday,
-      today,
-      events,
-      live,
-      finished,
-      upcoming,
-      yesterdayEvents,
-      todayEvents,
-      latestAvailable,
-      latestDateByLeague: Object.fromEntries(
-        latestDateByLeague.entries()
-      ),
-      count: events.length,
-      liveCount: live.length,
-      updated: new Date().toISOString(),
-      scoreWindow: hasCurrent
-        ? "yesterday-and-today"
-        : "latest-available"
-    };
-
-    const response = json(
-      responseData,
-      200,
-      {
-        "Cache-Control": "public, max-age=60, s-maxage=60"
-      }
-    );
-
-    await cache.put(cacheUrl, response.clone());
-    return response;
-
-  } catch (error) {
-    return json({
-      ok: false,
-      error: error?.message || String(error),
-      updated: new Date().toISOString()
-    }, 500);
-  }
-}
-
 
     if (status) {
       status.textContent =
-        `${events.length} match${
-          events.length === 1 ? "" : "es"
+        "Loading…";
+    }
+
+
+    const data =
+      await fetchJSON(
+        "/api/scores"
+      );
+
+
+    if (
+      data &&
+      data.ok === false
+    ) {
+
+      throw new Error(
+        data.error ||
+        "Scores API error"
+      );
+    }
+
+
+    /*
+     * The current backend returns:
+     *
+     * latestAvailable
+     * events
+     * live
+     * finished
+     * upcoming
+     *
+     * During an international break,
+     * latestAvailable contains the most
+     * recent completed matchday for
+     * each competition.
+     */
+
+
+    let events = [];
+
+
+    if (
+      Array.isArray(
+        data.latestAvailable
+      ) &&
+      data.latestAvailable.length
+    ) {
+
+      events =
+        data.latestAvailable;
+
+    } else if (
+      Array.isArray(data.events)
+    ) {
+
+      events =
+        data.events;
+
+    } else if (
+      Array.isArray(data.finished)
+    ) {
+
+      events =
+        data.finished;
+    }
+
+
+    /*
+     * Defensive filtering.
+     * Only YepFootball competitions.
+     */
+
+    events =
+      events.filter(
+        match =>
+          SCORE_LEAGUE_IDS.has(
+            Number(match?.leagueId)
+          )
+      );
+
+
+    /*
+     * If a specific league is selected,
+     * only show that league.
+     */
+
+    if (
+      currentLeague !== null
+    ) {
+
+      events =
+        events.filter(
+          match =>
+            Number(match?.leagueId) ===
+            currentLeague
+        );
+    }
+
+
+    renderScores(events);
+
+
+    /*
+     * Update match count.
+     */
+
+    if (status) {
+
+      status.textContent =
+        `${events.length} ${
+          events.length === 1
+            ? "match"
+            : "matches"
         }`;
     }
 
+
+    /*
+     * Update global timestamp.
+     */
+
     const updated =
-      document.getElementById("updated");
+      document.getElementById(
+        "updated"
+      );
+
 
     if (updated) {
+
       updated.textContent =
         `Updated ${new Date().toLocaleTimeString(
           "en-GB",
@@ -774,9 +873,10 @@ async function scores(
   } catch (error) {
 
     console.error(
-      "Scores error:",
+      "YepFootball scores error:",
       error
     );
+
 
     grid.innerHTML = `
       <div class="empty">
@@ -784,32 +884,39 @@ async function scores(
       </div>
     `;
 
+
     if (status) {
-      status.textContent = "Retrying…";
+      status.textContent =
+        "Scores unavailable";
     }
 
-    window.setTimeout(
-      () => loadScores(),
-      20000
-    );
   }
 }
+
 
 /* =========================================================
    FIXTURE CARD
    ========================================================= */
 
-function fixtureCard(
-  match
-) {
+function fixtureCard(match) {
 
   const home =
-    match.homeTeam ||
-    {};
+    match.homeTeam || {};
 
   const away =
-    match.awayTeam ||
-    {};
+    match.awayTeam || {};
+
+
+  const homeName =
+    home.shortName ||
+    home.name ||
+    "Home";
+
+
+  const awayName =
+    away.shortName ||
+    away.name ||
+    "Away";
 
 
   return `
@@ -819,32 +926,32 @@ function fixtureCard(
 
         <span>
           ${escapeHTML(
-            match.league ||
-            ""
+            match.league || ""
           )}
         </span>
 
         <span>
           ${escapeHTML(
-            formatDate(
-              match.date
-            )
+            formatDate(match.date)
           )}
         </span>
 
       </div>
 
+
       <div class="fixture-time">
 
         ${escapeHTML(
-          formatTime(
-            match.date
-          )
+          formatTime(match.date)
         )}
 
       </div>
 
+
       <div class="fixture-teams">
+
+
+        <!-- HOME -->
 
         <div class="fixture-team">
 
@@ -852,9 +959,7 @@ function fixtureCard(
             home.crest
               ? `
                 <img
-                  src="${escapeHTML(
-                    home.crest
-                  )}"
+                  src="${escapeHTML(home.crest)}"
                   alt=""
                   loading="lazy"
                 >
@@ -867,16 +972,20 @@ function fixtureCard(
           }
 
           <strong>
-            ${escapeHTML(
-              home.name
-            )}
+            ${escapeHTML(homeName)}
           </strong>
 
         </div>
 
+
+        <!-- VS -->
+
         <div class="vs">
           VS
         </div>
+
+
+        <!-- AWAY -->
 
         <div class="fixture-team">
 
@@ -884,9 +993,7 @@ function fixtureCard(
             away.crest
               ? `
                 <img
-                  src="${escapeHTML(
-                    away.crest
-                  )}"
+                  src="${escapeHTML(away.crest)}"
                   alt=""
                   loading="lazy"
                 >
@@ -899,9 +1006,7 @@ function fixtureCard(
           }
 
           <strong>
-            ${escapeHTML(
-              away.name
-            )}
+            ${escapeHTML(awayName)}
           </strong>
 
         </div>
@@ -930,74 +1035,96 @@ async function loadFixtures() {
   }
 
 
+  const message =
+    document.getElementById(
+      "fixtures-message"
+    );
+
+
+  const windowElement =
+    document.getElementById(
+      "fixtures-window"
+    );
+
+
   try {
 
+    grid.innerHTML = `
+      <div class="empty">
+        Loading fixtures…
+      </div>
+    `;
+
+
     /*
-      IMPORTANT:
-      New endpoint deliberately bypasses
-      the old /api/fixtures cache.
-    */
-
-    const response =
-      await fetch(
-        "/api/fixtures-v2",
-        {
-          cache:
-            "no-store"
-        }
-      );
-
+     * IMPORTANT:
+     *
+     * Use the new endpoint.
+     *
+     * Do NOT change this back to
+     * /api/fixtures
+     */
 
     const data =
-      await safeJSON(
-        response
+      await fetchJSON(
+        "/api/fixtures-v2"
       );
-
-
-    const fixtures =
-      data.fixtures ||
-      data.events ||
-      [];
 
 
     /*
-      Optional message element.
-    */
+     * The Worker currently returns
+     * fixtures and also events.
+     */
 
-    const message =
-      document.getElementById(
-        "fixtures-message"
-      );
-
-
-    const windowElement =
-      document.getElementById(
-        "fixtures-window"
-      );
+    let fixtures =
+      Array.isArray(data.fixtures)
+        ? data.fixtures
+        : [];
 
 
-    if (message) {
+    if (
+      !fixtures.length &&
+      Array.isArray(data.events)
+    ) {
 
-      if (
-        data.message
-      ) {
-
-        message.textContent =
-          data.message;
-
-        message.style.display =
-          "block";
-
-      } else {
-
-        message.textContent =
-          "";
-
-        message.style.display =
-          "none";
-      }
+      fixtures =
+        data.events;
     }
 
+
+    /*
+     * Defensive filtering.
+     */
+
+    fixtures =
+      fixtures.filter(
+        match =>
+          SCORE_LEAGUE_IDS.has(
+            Number(
+              match?.leagueId
+            )
+          )
+      );
+
+
+    /*
+     * Sort by date.
+     */
+
+    fixtures.sort(
+      (a, b) =>
+        new Date(
+          a.date || 0
+        ) -
+        new Date(
+          b.date || 0
+        )
+    );
+
+
+    /*
+     * Display API date range.
+     */
 
     if (windowElement) {
 
@@ -1021,46 +1148,79 @@ async function loadFixtures() {
     }
 
 
-    if (
-      fixtures.length === 0
-    ) {
+    /*
+     * API message.
+     */
 
-      grid.innerHTML =
-        `
-          <div class="empty">
-            ${
-              data.message ||
-              "No upcoming fixtures found."
-            }
-          </div>
-        `;
+    if (message) {
+
+      if (data.message) {
+
+        message.textContent =
+          data.message;
+
+        message.style.display =
+          "block";
+
+      } else {
+
+        message.textContent =
+          "";
+
+        message.style.display =
+          "none";
+      }
+    }
+
+
+    /*
+     * No fixtures.
+     */
+
+    if (!fixtures.length) {
+
+      grid.innerHTML = `
+        <div class="empty">
+          ${
+            data.message ||
+            "No upcoming fixtures found."
+          }
+        </div>
+      `;
 
       return;
     }
 
 
+    /*
+     * Render fixtures.
+     */
+
     grid.innerHTML =
       fixtures
-        .map(
-          fixtureCard
-        )
+        .map(fixtureCard)
         .join("");
 
 
   } catch (error) {
 
     console.error(
-      "Fixtures error:",
+      "YepFootball fixtures error:",
       error
     );
 
 
-    grid.innerHTML =
-      `
-        <div class="empty">
-          Unable to load fixtures.
-        </div>
-      `;
+    grid.innerHTML = `
+      <div class="empty">
+        Unable to load fixtures.
+      </div>
+    `;
+
+
+    if (windowElement) {
+      windowElement.textContent =
+        "Unable to load";
+    }
   }
 }
 
@@ -1069,9 +1229,7 @@ async function loadFixtures() {
    NEWS CARD
    ========================================================= */
 
-function newsCard(
-  article
-) {
+function newsCard(article) {
 
   const title =
     article.title ||
@@ -1096,53 +1254,51 @@ function newsCard(
   return `
     <article class="news-card">
 
+
       ${
         image
           ? `
             <a
-              href="${escapeHTML(
-                link
-              )}"
+              href="${escapeHTML(link)}"
               target="_blank"
-              rel="noopener"
+              rel="noopener noreferrer"
             >
+
               <img
-                src="${escapeHTML(
-                  image
-                )}"
+                src="${escapeHTML(image)}"
                 alt=""
                 loading="lazy"
               >
+
             </a>
           `
           : ""
       }
 
+
       <div class="news-meta">
         BBC SPORT
       </div>
 
+
       <h3>
+
         <a
-          href="${escapeHTML(
-            link
-          )}"
+          href="${escapeHTML(link)}"
           target="_blank"
-          rel="noopener"
+          rel="noopener noreferrer"
         >
-          ${escapeHTML(
-            title
-          )}
+          ${escapeHTML(title)}
         </a>
+
       </h3>
+
 
       ${
         description
           ? `
             <p>
-              ${escapeHTML(
-                description
-              )}
+              ${escapeHTML(description)}
             </p>
           `
           : ""
@@ -1172,37 +1328,27 @@ async function loadNews() {
 
   try {
 
-    const response =
-      await fetch(
-        "/api/news",
-        {
-          cache:
-            "no-store"
-        }
-      );
-
-
     const data =
-      await safeJSON(
-        response
+      await fetchJSON(
+        "/api/news"
       );
 
 
     const articles =
-      data.articles ||
-      [];
+      Array.isArray(
+        data.articles
+      )
+        ? data.articles
+        : [];
 
 
-    if (
-      articles.length === 0
-    ) {
+    if (!articles.length) {
 
-      grid.innerHTML =
-        `
-          <div class="empty">
-            No news available.
-          </div>
-        `;
+      grid.innerHTML = `
+        <div class="empty">
+          No news available.
+        </div>
+      `;
 
       return;
     }
@@ -1210,64 +1356,103 @@ async function loadNews() {
 
     grid.innerHTML =
       articles
-        .map(
-          newsCard
-        )
+        .map(newsCard)
         .join("");
 
 
   } catch (error) {
 
     console.error(
-      "News error:",
+      "YepFootball news error:",
       error
     );
 
 
-    grid.innerHTML =
-      `
-        <div class="empty">
-          Unable to load news.
-        </div>
-      `;
+    grid.innerHTML = `
+      <div class="empty">
+        Unable to load news.
+      </div>
+    `;
   }
 }
 
 
 /* =========================================================
-   INITIAL LOAD
+   INITIALISE
    ========================================================= */
 
-document.addEventListener(
-  "DOMContentLoaded",
-  () => {
+function initYepFootball() {
 
-    loadScores();
+  updateYear();
 
-    loadFixtures();
+  renderLeagueTabs();
 
-    loadNews();
-  }
-);
+  loadScores();
+
+  loadFixtures();
+
+  loadNews();
+}
+
+
+/* =========================================================
+   START
+   ========================================================= */
+
+if (
+  document.readyState ===
+  "loading"
+) {
+
+  document.addEventListener(
+    "DOMContentLoaded",
+    initYepFootball
+  );
+
+} else {
+
+  initYepFootball();
+}
 
 
 /* =========================================================
    AUTOMATIC REFRESH
    ========================================================= */
 
+/*
+ * Scores:
+ * refresh every 2 minutes.
+ */
+
 setInterval(
-  loadScores,
+  () => {
+    loadScores();
+  },
   2 * 60 * 1000
 );
 
 
+/*
+ * Fixtures:
+ * refresh every 15 minutes.
+ */
+
 setInterval(
-  loadFixtures,
+  () => {
+    loadFixtures();
+  },
   15 * 60 * 1000
 );
 
 
+/*
+ * News:
+ * refresh every 30 minutes.
+ */
+
 setInterval(
-  loadNews,
+  () => {
+    loadNews();
+  },
   30 * 60 * 1000
 );
