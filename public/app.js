@@ -86,7 +86,21 @@ let currentLeague = null;
 
 
 /* =========================================================
-   HELPERS
+   VIDEO CATEGORIES
+   ========================================================= */
+
+const VIDEO_CATEGORIES = [
+  "UEFA",
+  "Premier League",
+  "LaLiga"
+];
+
+
+let allVideos = [];
+
+
+/* =========================================================
+   HTML ESCAPE
    ========================================================= */
 
 function escapeHTML(value) {
@@ -101,7 +115,7 @@ function escapeHTML(value) {
 
 
 /* =========================================================
-   DATE
+   DATE FORMAT
    ========================================================= */
 
 function formatDate(date) {
@@ -132,6 +146,10 @@ function formatDate(date) {
 }
 
 
+/* =========================================================
+   LONG DATE FORMAT
+   ========================================================= */
+
 function formatLongDate(date) {
 
   if (!date) {
@@ -159,6 +177,10 @@ function formatLongDate(date) {
   );
 }
 
+
+/* =========================================================
+   TIME FORMAT
+   ========================================================= */
 
 function formatTime(date) {
 
@@ -305,6 +327,7 @@ function renderLeagueTabs() {
             renderLeagueTabs();
 
             loadScores();
+
           }
         );
       }
@@ -368,7 +391,9 @@ function getScoreStatusText(
    SCORE CARD
    ========================================================= */
 
-function scoreCard(match) {
+function scoreCard(
+  match
+) {
 
   const home =
     match.homeTeam || {};
@@ -555,7 +580,7 @@ function scoreLeagueHeading(
 
 
 /* =========================================================
-   GROUP SCORES
+   GROUP SCORES BY LEAGUE
    ========================================================= */
 
 function groupScoresByLeague(
@@ -851,7 +876,7 @@ async function loadScores() {
 
 
     /*
-     * New backend structure.
+     * Latest available scores.
      */
 
     if (
@@ -866,9 +891,9 @@ async function loadScores() {
 
     }
 
+
     /*
-     * Current backend also
-     * provides events.
+     * Standard events.
      */
 
     else if (
@@ -881,8 +906,9 @@ async function loadScores() {
         data.events;
     }
 
+
     /*
-     * Fallback.
+     * Finished fallback.
      */
 
     else if (
@@ -896,6 +922,11 @@ async function loadScores() {
     }
 
 
+    /*
+     * Only use supported
+     * YepFootball competitions.
+     */
+
     events =
       events.filter(
         match =>
@@ -906,6 +937,10 @@ async function loadScores() {
           )
       );
 
+
+    /*
+     * Selected competition.
+     */
 
     if (
       currentLeague !== null
@@ -1133,6 +1168,11 @@ async function loadFixtures() {
     `;
 
 
+    /*
+     * IMPORTANT:
+     * Use fixtures-v2.
+     */
+
     const data =
       await fetchJSON(
         "/api/fixtures-v2"
@@ -1146,6 +1186,10 @@ async function loadFixtures() {
         ? data.fixtures
         : [];
 
+
+    /*
+     * Events fallback.
+     */
 
     if (
       !fixtures.length &&
@@ -1431,25 +1475,8 @@ async function loadNews() {
 
 
 /* =========================================================
-   VIDEOS
+   VIDEO CATEGORY
    ========================================================= */
-
-
-/*
- * Supported video categories.
- */
-
-const VIDEO_CATEGORIES = [
-  "UEFA",
-  "Premier League",
-  "LaLiga"
-];
-
-
-/*
- * Normalise category names returned
- * by the Worker.
- */
 
 function normaliseVideoCategory(
   value
@@ -1488,7 +1515,77 @@ function normaliseVideoCategory(
   }
 
 
-  return value || "Football";
+  return value ||
+    "Football";
+}
+
+
+/* =========================================================
+   YOUTUBE VIDEO ID
+   ========================================================= */
+
+function getYouTubeVideoId(
+  url
+) {
+
+  if (!url) {
+    return "";
+  }
+
+
+  const text =
+    String(url);
+
+
+  /*
+   * YouTube watch URL
+   */
+
+  const watchMatch =
+    text.match(
+      /[?&]v=([^&]+)/i
+    );
+
+
+  if (watchMatch) {
+
+    return watchMatch[1];
+  }
+
+
+  /*
+   * YouTube short URL
+   */
+
+  const shortMatch =
+    text.match(
+      /youtu\.be\/([^?&/]+)/i
+    );
+
+
+  if (shortMatch) {
+
+    return shortMatch[1];
+  }
+
+
+  /*
+   * YouTube embed URL
+   */
+
+  const embedMatch =
+    text.match(
+      /youtube\.com\/embed\/([^?&/]+)/i
+    );
+
+
+  if (embedMatch) {
+
+    return embedMatch[1];
+  }
+
+
+  return "";
 }
 
 
@@ -1499,6 +1596,10 @@ function normaliseVideoCategory(
 function getVideoThumbnail(
   video
 ) {
+
+  /*
+   * API supplied thumbnail.
+   */
 
   if (
     video.thumbnail
@@ -1525,19 +1626,42 @@ function getVideoThumbnail(
 
 
   /*
-   * If the Worker only supplies a
-   * YouTube video ID, create the
-   * standard YouTube thumbnail.
+   * Video ID.
    */
 
-  if (
-    video.videoId
-  ) {
+  let videoId =
+    video.videoId ||
+    video.youtubeId ||
+    "";
+
+
+  /*
+   * Extract from URL.
+   */
+
+  if (!videoId) {
+
+    videoId =
+      getYouTubeVideoId(
+        video.url ||
+        video.link ||
+        video.videoUrl ||
+        ""
+      );
+  }
+
+
+  /*
+   * Standard YouTube
+   * thumbnail.
+   */
+
+  if (videoId) {
 
     return `
       https://i.ytimg.com/vi/${
         encodeURIComponent(
-          video.videoId
+          videoId
         )
       }/hqdefault.jpg
     `;
@@ -1594,6 +1718,20 @@ function getVideoURL(
   }
 
 
+  if (
+    video.youtubeId
+  ) {
+
+    return `
+      https://www.youtube.com/watch?v=${
+        encodeURIComponent(
+          video.youtubeId
+        )
+      }
+    `;
+  }
+
+
   return "#";
 }
 
@@ -1644,6 +1782,7 @@ function videoCard(
         rel="noopener noreferrer"
       >
 
+
         ${
           thumbnail
             ? `
@@ -1655,24 +1794,35 @@ function videoCard(
                   title
                 )}"
                 loading="lazy"
+                onerror="
+                  this.style.display='none';
+                  this.parentElement.classList.add(
+                    'video-no-image'
+                  );
+                "
               >
             `
             : `
               <div class="video-placeholder">
-                ▶
+                ⚽
               </div>
             `
         }
 
 
-        <span class="video-play">
+        <span
+          class="video-play"
+          aria-label="Play video"
+        >
           ▶
         </span>
+
 
       </a>
 
 
       <div class="video-content">
+
 
         <div class="video-meta">
 
@@ -1703,18 +1853,23 @@ function videoCard(
 
 
         ${
-          video.published
+          video.published ||
+          video.pubDate ||
+          video.date
             ? `
               <small>
                 ${escapeHTML(
                   formatDate(
-                    video.published
+                    video.published ||
+                    video.pubDate ||
+                    video.date
                   )
                 )}
               </small>
             `
             : ""
         }
+
 
       </div>
 
@@ -1724,7 +1879,7 @@ function videoCard(
 
 
 /* =========================================================
-   VIDEO SECTION HEADER
+   VIDEO TABS
    ========================================================= */
 
 function renderVideoSectionHeader() {
@@ -1740,40 +1895,44 @@ function renderVideoSectionHeader() {
   }
 
 
-  container.innerHTML =
-    `
-      <button
-        type="button"
-        class="video-tab active"
-        data-video-category="ALL"
-      >
-        All
-      </button>
+  container.innerHTML = `
 
-      <button
-        type="button"
-        class="video-tab"
-        data-video-category="UEFA"
-      >
-        UEFA
-      </button>
+    <button
+      type="button"
+      class="video-tab active"
+      data-video-category="ALL"
+    >
+      All
+    </button>
 
-      <button
-        type="button"
-        class="video-tab"
-        data-video-category="Premier League"
-      >
-        Premier League
-      </button>
 
-      <button
-        type="button"
-        class="video-tab"
-        data-video-category="LaLiga"
-      >
-        LaLiga
-      </button>
-    `;
+    <button
+      type="button"
+      class="video-tab"
+      data-video-category="UEFA"
+    >
+      UEFA
+    </button>
+
+
+    <button
+      type="button"
+      class="video-tab"
+      data-video-category="Premier League"
+    >
+      Premier League
+    </button>
+
+
+    <button
+      type="button"
+      class="video-tab"
+      data-video-category="LaLiga"
+    >
+      LaLiga
+    </button>
+
+  `;
 
 
   container
@@ -1804,26 +1963,16 @@ function renderVideoSectionHeader() {
             );
 
 
-            const category =
-              button.dataset
-                .videoCategory;
-
-
             filterVideos(
-              category
+              button.dataset
+                .videoCategory
             );
+
           }
         );
       }
     );
 }
-
-
-/* =========================================================
-   VIDEO STATE
-   ========================================================= */
-
-let allVideos = [];
 
 
 /* =========================================================
@@ -1837,6 +1986,9 @@ function filterVideos(
   const grid =
     document.getElementById(
       "videos-grid"
+    ) ||
+    document.getElementById(
+      "video-grid"
     );
 
 
@@ -1894,16 +2046,6 @@ function filterVideos(
 
 async function loadVideos() {
 
-  /*
-   * Support either:
-   *
-   * videos-grid
-   * video-grid
-   *
-   * depending on the current
-   * index.html.
-   */
-
   const grid =
     document.getElementById(
       "videos-grid"
@@ -1928,8 +2070,7 @@ async function loadVideos() {
 
 
     /*
-     * New YepFootball videos
-     * endpoint.
+     * YepFootball video API.
      */
 
     const data =
@@ -1940,7 +2081,7 @@ async function loadVideos() {
 
     /*
      * Accept several possible
-     * response formats.
+     * API response structures.
      */
 
     if (
@@ -1952,7 +2093,9 @@ async function loadVideos() {
       allVideos =
         data.videos;
 
-    } else if (
+    }
+
+    else if (
       Array.isArray(
         data.items
       )
@@ -1961,7 +2104,9 @@ async function loadVideos() {
       allVideos =
         data.items;
 
-    } else if (
+    }
+
+    else if (
       Array.isArray(
         data.results
       )
@@ -1970,15 +2115,16 @@ async function loadVideos() {
       allVideos =
         data.results;
 
-    } else {
+    }
+
+    else {
 
       allVideos = [];
     }
 
 
     /*
-     * Only show the three requested
-     * competitions.
+     * Only requested competitions.
      */
 
     allVideos =
@@ -2026,13 +2172,8 @@ async function loadVideos() {
 
 
     /*
-     * Maximum six videos:
-     * two UEFA
-     * two Premier League
-     * two LaLiga
-     *
-     * This keeps the section
-     * compact.
+     * Keep two latest videos
+     * for each competition.
      */
 
     const selected = [];
@@ -2052,19 +2193,23 @@ async function loadVideos() {
                 ) ===
                 category
             )
-            .slice(0, 2);
+            .slice(
+              0,
+              2
+            );
 
 
         selected.push(
           ...categoryVideos
         );
+
       }
     );
 
 
     /*
-     * Sort the selected videos
-     * again by publication date.
+     * Sort the six selected
+     * videos by publication date.
      */
 
     selected.sort(
@@ -2099,12 +2244,15 @@ async function loadVideos() {
 
 
     /*
-     * Add video tabs if the
-     * HTML contains the container.
+     * Create category tabs.
      */
 
     renderVideoSectionHeader();
 
+
+    /*
+     * Display all videos.
+     */
 
     filterVideos(
       "ALL"
@@ -2175,7 +2323,8 @@ if (
 
 
 /*
- * Scores every 2 minutes.
+ * Scores:
+ * every 2 minutes.
  */
 
 setInterval(
@@ -2189,7 +2338,8 @@ setInterval(
 
 
 /*
- * Fixtures every 15 minutes.
+ * Fixtures:
+ * every 15 minutes.
  */
 
 setInterval(
@@ -2203,7 +2353,8 @@ setInterval(
 
 
 /*
- * BBC News every 30 minutes.
+ * BBC News:
+ * every 30 minutes.
  */
 
 setInterval(
@@ -2217,7 +2368,8 @@ setInterval(
 
 
 /*
- * Videos every 30 minutes.
+ * Videos:
+ * every 30 minutes.
  */
 
 setInterval(
