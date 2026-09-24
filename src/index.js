@@ -1,6 +1,6 @@
 /* =====================================================
    YEPFOOTBALL WORKER
-   Version: 2026-09-23.7
+   Version: 2026-09-24.1
 
    SCORES
    football-data.org latest completed results
@@ -13,12 +13,12 @@
    BBC Sport RSS
 
    VIDEOS
-   UEFA - fixed working video
-   Premier League - YouTube RSS
-   LaLiga - YouTube RSS
+   Official UEFA
+   Official Premier League
+   Official LaLiga
 ===================================================== */
 
-const VERSION = "2026-09-23.7";
+const VERSION = "2026-09-24.1";
 
 
 /* =====================================================
@@ -92,17 +92,34 @@ const FD_CODES = COMPETITIONS
 
 
 /* =====================================================
-   YOUTUBE CHANNELS
+   OFFICIAL YOUTUBE CHANNELS
+=====================================================
+
+   UEFA:
+   Official UEFA YouTube channel
+
+   Premier League:
+   Official Premier League YouTube channel
+
+   LaLiga:
+   Official LaLiga YouTube channel
+
+   Using channel IDs avoids unreliable
+   @handle resolution.
 ===================================================== */
 
 const VIDEO_CHANNELS = [
   {
+    category: "UEFA",
+    channelId: "UCqZQlzSHbVJrwrn5XvY0VJg"
+  },
+  {
     category: "Premier League",
-    handle: "@premierleague"
+    channelId: "UCSZbXT5TLLW_i-5W8FZBfRA"
   },
   {
     category: "LaLiga",
-    handle: "@LaLiga"
+    channelId: "UCWCl6G7i9JcJ6xWmYw6JxqA"
   }
 ];
 
@@ -125,10 +142,12 @@ function json(
   status = 200,
   extra = {}
 ) {
+
   return new Response(
     JSON.stringify(data),
     {
       status,
+
       headers: {
         ...JSON_HEADERS,
         ...extra
@@ -139,6 +158,7 @@ function json(
 
 
 function corsHeaders() {
+
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods":
@@ -208,7 +228,7 @@ function addDays(
 
 
 /* =====================================================
-   TEXT / XML HELPERS
+   XML / TEXT HELPERS
 ===================================================== */
 
 function cleanText(
@@ -216,38 +236,47 @@ function cleanText(
 ) {
 
   return String(value)
+
     .replace(
       /<!\[CDATA\[([\s\S]*?)\]\]>/g,
       "$1"
     )
+
     .replace(
       /<[^>]*>/g,
       " "
     )
+
     .replace(
       /&amp;/g,
       "&"
     )
+
     .replace(
       /&lt;/g,
       "<"
     )
+
     .replace(
       /&gt;/g,
       ">"
     )
+
     .replace(
       /&quot;/g,
       '"'
     )
+
     .replace(
       /&#39;|&#x27;/g,
       "'"
     )
+
     .replace(
       /\s+/g,
       " "
     )
+
     .trim();
 }
 
@@ -313,6 +342,7 @@ function formatDateTime(
       d.getTime()
     )
   ) {
+
     return value;
   }
 
@@ -335,17 +365,21 @@ function normalizeFootballDataMatch(
         match.competition?.code
     );
 
+
   const status =
     match.status ||
     "SCHEDULED";
+
 
   const homeScore =
     match.score?.fullTime?.home ??
     null;
 
+
   const awayScore =
     match.score?.fullTime?.away ??
     null;
+
 
   return {
 
@@ -444,10 +478,12 @@ async function footballDataFetch(
   if (
     !env.FOOTBALL_DATA_TOKEN
   ) {
+
     throw new Error(
       "Missing FOOTBALL_DATA_TOKEN"
     );
   }
+
 
   const response =
     await fetch(
@@ -469,8 +505,10 @@ async function footballDataFetch(
       }
     );
 
+
   const text =
     await response.text();
+
 
   if (
     !response.ok
@@ -480,6 +518,7 @@ async function footballDataFetch(
       `football-data.org ${response.status}: ${text.slice(0, 300)}`
     );
   }
+
 
   return JSON.parse(text);
 }
@@ -497,14 +536,17 @@ async function apiFootballFetch(
   if (
     !env.API_FOOTBALL_KEY
   ) {
+
     return null;
   }
+
 
   const response =
     await fetch(
       `https://v3.football.api-sports.io${path}`,
       {
         headers: {
+
           "x-apisports-key":
             env.API_FOOTBALL_KEY
         },
@@ -516,11 +558,14 @@ async function apiFootballFetch(
       }
     );
 
+
   if (
     !response.ok
   ) {
+
     return null;
   }
+
 
   return response.json();
 }
@@ -538,8 +583,10 @@ async function scores(
   const now =
     new Date();
 
+
   const today =
     isoDate(now);
+
 
   const yesterday =
     isoDate(
@@ -549,21 +596,15 @@ async function scores(
       )
     );
 
+
   let matches = [];
+
 
   let source =
     "football-data.org";
 
 
   try {
-
-    /*
-      football-data.org only permits
-      date ranges of up to 10 days.
-
-      We therefore search backwards
-      in 10-day blocks.
-    */
 
     for (
       let offset = 0;
@@ -579,6 +620,7 @@ async function scores(
           )
         );
 
+
       const to =
         isoDate(
           addDays(
@@ -587,11 +629,13 @@ async function scores(
           )
         );
 
+
       const data =
         await footballDataFetch(
           env,
           `/matches?dateFrom=${from}&dateTo=${to}&competitions=${encodeURIComponent(FD_CODES)}`
         );
+
 
       if (
         Array.isArray(
@@ -612,16 +656,13 @@ async function scores(
     source =
       "football-data.org unavailable";
 
+
     console.error(
       "Scores error:",
       error
     );
   }
 
-
-  /*
-    Keep only our eight competitions.
-  */
 
   matches =
     matches.filter(
@@ -631,10 +672,6 @@ async function scores(
         )
     );
 
-
-  /*
-    Finished matches only.
-  */
 
   const finished =
     matches.filter(
@@ -650,10 +687,6 @@ async function scores(
     );
 
 
-  /*
-    Remove duplicates.
-  */
-
   const unique =
     Array.from(
       new Map(
@@ -666,11 +699,6 @@ async function scores(
       ).values()
     );
 
-
-  /*
-    Find latest completed date
-    for each competition.
-  */
 
   const latestDateByLeague = {};
 
@@ -689,9 +717,11 @@ async function scores(
         10
       );
 
+
     if (!date) {
       continue;
     }
+
 
     if (
       !latestDateByLeague[
@@ -710,11 +740,6 @@ async function scores(
   }
 
 
-  /*
-    Return the latest available
-    completed matches for each league.
-  */
-
   const latestAvailable = [];
 
 
@@ -728,12 +753,15 @@ async function scores(
         competition.code
       ];
 
+
     if (!date) {
       continue;
     }
 
+
     const leagueMatches =
       unique
+
         .filter(
           match =>
             match.leagueCode ===
@@ -746,6 +774,7 @@ async function scores(
               10
             ) === date
         )
+
         .sort(
           (a, b) =>
             new Date(
@@ -756,6 +785,7 @@ async function scores(
             )
         );
 
+
     latestAvailable.push(
       ...leagueMatches
     );
@@ -763,7 +793,7 @@ async function scores(
 
 
   /* ===================================================
-     LIVE SCORES
+     LIVE
   =================================================== */
 
   let live = [];
@@ -776,6 +806,7 @@ async function scores(
         env,
         "/fixtures?live=all"
       );
+
 
     if (
       liveData?.response
@@ -885,11 +916,6 @@ async function scores(
   }
 
 
-  /*
-    Today's and yesterday's
-    completed matches.
-  */
-
   const todayEvents =
     unique.filter(
       match =>
@@ -971,8 +997,10 @@ async function fixturesV2(
   const now =
     new Date();
 
+
   const fromDate =
     isoDate(now);
+
 
   const toDate =
     isoDate(
@@ -982,14 +1010,11 @@ async function fixturesV2(
       )
     );
 
+
   let fixtures = [];
 
 
   try {
-
-    /*
-      Search in two 10-day blocks.
-    */
 
     for (
       let offset = 0;
@@ -1005,6 +1030,7 @@ async function fixturesV2(
           )
         );
 
+
       const to =
         isoDate(
           addDays(
@@ -1015,6 +1041,7 @@ async function fixturesV2(
             )
           )
         );
+
 
       const data =
         await footballDataFetch(
@@ -1044,8 +1071,10 @@ async function fixturesV2(
       error
     );
 
+
     return json(
       {
+
         ok: false,
 
         source:
@@ -1069,20 +1098,17 @@ async function fixturesV2(
 
         isNextAvailable:
           false
+
       },
       502
     );
   }
 
 
-  /*
-    Remove duplicates and keep
-    only our competitions.
-  */
-
   fixtures =
     Array.from(
       new Map(
+
         fixtures
 
           .filter(
@@ -1098,6 +1124,7 @@ async function fixturesV2(
               match
             ]
           )
+
       ).values()
     );
 
@@ -1143,7 +1170,7 @@ async function fixturesV2(
 
 
 /* =====================================================
-   BBC NEWS
+   BBC NEWS PARSER
 ===================================================== */
 
 function parseBBCNews(
@@ -1172,17 +1199,20 @@ function parseBBCNews(
             "title"
           );
 
+
         const description =
           xmlValue(
             item,
             "description"
           );
 
+
         const link =
           xmlValue(
             item,
             "link"
           );
+
 
         const pubDate =
           xmlValue(
@@ -1266,7 +1296,7 @@ function parseBBCNews(
 
 
 /* =====================================================
-   BBC NEWS ENDPOINT
+   BBC NEWS
 ===================================================== */
 
 async function news(
@@ -1285,13 +1315,17 @@ async function news(
         rssUrl,
         {
           headers: {
+
             "User-Agent":
               "Mozilla/5.0 (compatible; YepFootball/1.0)"
           },
 
           cf: {
+
             cacheTtl: 900,
-            cacheEverything: true
+
+            cacheEverything:
+              true
           }
         }
       );
@@ -1371,84 +1405,6 @@ async function news(
 
 
 /* =====================================================
-   YOUTUBE CHANNEL ID RESOLUTION
-===================================================== */
-
-async function resolveYouTubeChannelId(
-  handle
-) {
-
-  const url =
-    `https://www.youtube.com/${handle}`;
-
-
-  const response =
-    await fetch(
-      url,
-      {
-        headers: {
-
-          "User-Agent":
-            "Mozilla/5.0 (compatible; YepFootball/1.0)"
-        },
-
-        cf: {
-          cacheTtl: 86400,
-          cacheEverything: true
-        }
-      }
-    );
-
-
-  if (
-    !response.ok
-  ) {
-
-    throw new Error(
-      `YouTube channel ${handle} returned ${response.status}`
-    );
-  }
-
-
-  const html =
-    await response.text();
-
-
-  const patterns = [
-
-    /"channelId":"(UC[a-zA-Z0-9_-]{20,})"/,
-
-    /"externalId":"(UC[a-zA-Z0-9_-]{20,})"/,
-
-    /<meta[^>]+itemprop=["']channelId["'][^>]+content=["'](UC[a-zA-Z0-9_-]+)["']/i
-
-  ];
-
-
-  for (
-    const pattern
-    of patterns
-  ) {
-
-    const match =
-      html.match(
-        pattern
-      );
-
-
-    if (match) {
-      return match[1];
-    }
-  }
-
-
-  throw new Error(
-    `Could not resolve YouTube channel ID for ${handle}`
-  );
-}
-
-
-/* =====================================================
    YOUTUBE RSS
 ===================================================== */
 
@@ -1472,8 +1428,11 @@ async function fetchYouTubeRSS(
         },
 
         cf: {
+
           cacheTtl: 900,
-          cacheEverything: true
+
+          cacheEverything:
+            true
         }
       }
     );
@@ -1503,7 +1462,7 @@ async function fetchYouTubeRSS(
 
     .slice(
       0,
-      4
+      6
     )
 
     .map(
@@ -1537,7 +1496,10 @@ async function fetchYouTubeRSS(
           );
 
 
-        if (!videoId) {
+        if (
+          !videoId
+        ) {
+
           return null;
         }
 
@@ -1600,81 +1562,20 @@ async function videos(
   env
 ) {
 
-  /*
-    UEFA
-
-    We are deliberately using the
-    working UEFA video supplied by
-    Daniel rather than trying to
-    resolve the UEFA YouTube channel.
-
-    Video:
-    DLOUfAVwuXA
-  */
-
-  const uefaVideo = {
-
-    id:
-      "DLOUfAVwuXA",
-
-    videoId:
-      "DLOUfAVwuXA",
-
-    category:
-      "UEFA",
-
-    title:
-      "UEFA Football Highlights",
-
-    published:
-      new Date().toISOString(),
-
-    updated:
-      new Date().toISOString(),
-
-    thumbnail:
-      "https://i.ytimg.com/vi/DLOUfAVwuXA/hqdefault.jpg",
-
-    image:
-      "https://i.ytimg.com/vi/DLOUfAVwuXA/hqdefault.jpg",
-
-    url:
-      "https://www.youtube.com/watch?v=DLOUfAVwuXA",
-
-    videoURL:
-      "https://www.youtube.com/watch?v=DLOUfAVwuXA",
-
-    source:
-      "UEFA"
-  };
-
-
-  /*
-    Premier League + LaLiga
-  */
-
   const results =
     await Promise.allSettled(
 
       VIDEO_CHANNELS.map(
-        async channel => {
-
-          const channelId =
-            await resolveYouTubeChannelId(
-              channel.handle
-            );
-
-
-          return fetchYouTubeRSS(
-            channelId,
+        channel =>
+          fetchYouTubeRSS(
+            channel.channelId,
             channel.category
-          );
-        }
+          )
       )
     );
 
 
-  const dynamicVideos =
+  const allVideos =
     results
 
       .filter(
@@ -1690,22 +1591,7 @@ async function videos(
 
 
   /*
-    Combine UEFA + dynamic videos.
-  */
-
-  const allVideos = [
-
-    uefaVideo,
-
-    ...dynamicVideos
-
-  ];
-
-
-  /*
-    Sort newest first, but keep
-    UEFA available even though it
-    is a fixed video.
+    Sort newest first.
   */
 
   allVideos.sort(
@@ -1724,7 +1610,7 @@ async function videos(
     ok: true,
 
     source:
-      "Official UEFA, Premier League and LaLiga YouTube feeds",
+      "Official UEFA, Premier League and LaLiga YouTube channels",
 
     categories: [
 
@@ -1797,7 +1683,7 @@ async function health(
       "/api/fixtures-v2",
 
     videoSource:
-      "Official UEFA video + Premier League and LaLiga YouTube feeds",
+      "Official UEFA, Premier League and LaLiga YouTube channels",
 
     competitions:
       COMPETITIONS,
@@ -1829,7 +1715,7 @@ async function health(
 
 
 /* =====================================================
-   MAIN REQUEST HANDLER
+   MAIN HANDLER
 ===================================================== */
 
 async function handle(
@@ -1843,12 +1729,13 @@ async function handle(
       request.url
     );
 
+
   const path =
     url.pathname;
 
 
   /* -----------------------------------------------
-     CORS preflight
+     OPTIONS / CORS
   ------------------------------------------------ */
 
   if (
@@ -1922,8 +1809,7 @@ async function handle(
 
 
   /* -----------------------------------------------
-     OLD FIXTURES URL
-     Keep for compatibility
+     FIXTURES COMPATIBILITY
   ------------------------------------------------ */
 
   if (
@@ -1996,7 +1882,6 @@ async function handle(
 
   /* -----------------------------------------------
      MATCH CENTRE
-     Compatibility route
   ------------------------------------------------ */
 
   if (
@@ -2014,7 +1899,7 @@ async function handle(
 
 
   /* -----------------------------------------------
-     STATIC WEBSITE
+     STATIC ASSETS
   ------------------------------------------------ */
 
   if (
@@ -2048,7 +1933,7 @@ async function handle(
 
 
 /* =====================================================
-   CLOUDFLARE WORKER ENTRY POINT
+   CLOUDFLARE WORKER ENTRY
 ===================================================== */
 
 export default {
