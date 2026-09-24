@@ -1676,9 +1676,40 @@ function getVideoThumbnail(
    VIDEO URL
    ========================================================= */
 
+/* =========================================================
+   VIDEO URL
+   ========================================================= */
+
 function getVideoURL(
   video
 ) {
+
+  const category =
+    normaliseVideoCategory(
+      video.category ||
+      video.source ||
+      video.competition
+    );
+
+
+  /*
+   * UEFA videos:
+   * always open the official UEFA
+   * YouTube channel.
+   */
+  if (
+    category === "UEFA"
+  ) {
+
+    return "https://www.youtube.com/@uefa";
+  }
+
+
+  /*
+   * Premier League and LaLiga:
+   * use the actual video URL supplied
+   * by the API.
+   */
 
   if (
     video.url
@@ -1734,7 +1765,6 @@ function getVideoURL(
 
   return "#";
 }
-
 
 /* =========================================================
    VIDEO CARD
