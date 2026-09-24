@@ -552,13 +552,20 @@ function scoreCard(
    SCORE LEAGUE HEADING
    ========================================================= */
 
+/* =========================================================
+   SCORE LEAGUE HEADING
+   ========================================================= */
+
 function scoreLeagueHeading(
   leagueName,
   date
 ) {
 
   return `
-    <div class="score-day-heading">
+    <div
+      class="score-day-heading"
+      style="display:flex;align-items:center;gap:8px;"
+    >
 
       <span>
         ${escapeHTML(
@@ -577,8 +584,6 @@ function scoreLeagueHeading(
     </div>
   `;
 }
-
-
 /* =========================================================
    GROUP SCORES BY LEAGUE
    ========================================================= */
