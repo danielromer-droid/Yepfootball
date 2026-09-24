@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+
+  <meta charset="utf-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  >
+
+  <meta
+    name="description"
+    content="YepFootball — European football scores, fixtures, news and videos."
+  >
+
+  <title>
+    YepFootball — European Football
+  </title>
+
+  <link
+    rel="stylesheet"
+    href="/styles.css"
+  >
+
+
+  <style>
+    .contact-section {
+      background: #0b1110;
+      color: #fff;
+    }
+
+    .contact-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+      gap: 32px;
+      align-items: start;
+    }
+
+    .contact-info h3 {
+      margin: 0 0 12px;
+      font-size: 24px;
+    }
+
+    .contact-info p {
+      line-height: 1.7;
+      max-width: 560px;
+    }
+
+    .contact-details {
+      margin-top: 24px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .contact-details a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .contact-details a:hover {
+      color: #b8ff00;
+    }
+
+    .contact-form {
+      background: #111917;
+      border: 1px solid #34413d;
+      border-radius: 14px;
+      padding: 24px;
+      box-shadow: 0 12px 30px rgba(0,0,0,.22);
+    }
+
+    .contact-field {
+      margin-bottom: 16px;
+    }
+
+    .contact-field label {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+
+    .contact-field input,
+    .contact-field textarea {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #3b4945;
+      border-radius: 8px;
+      background: #0b1110;
+      color: #fff;
+      padding: 12px 13px;
+      font: inherit;
+    }
+
+    .contact-field textarea {
+      min-height: 150px;
+      resize: vertical;
+    }
+
+    .contact-field input:focus,
+    .contact-field textarea:focus {
+      outline: 2px solid #b8ff00;
+      outline-offset: 1px;
+      border-color: #b8ff00;
+    }
+
+    .contact-required {
+      color: #b8ff00;
+    }
+
+    .contact-status {
+      min-height: 22px;
+      margin: 14px 0 0;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .contact-status.success {
+      color: #b8ff00;
+    }
+
+    .contact-status.error {
+      color: #ff8a8a;
+    }
+
+    .contact-form button[disabled] {
+      opacity: .65;
+      cursor: wait;
+    }
+
+    .contact-honeypot {
+      position: absolute;
+      left: -9999px;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+    }
+
+    .legal-content {
+      max-width: 900px;
+    }
+
+    .legal-content h3 {
+      margin-top: 24px;
+    }
+
+    .legal-content p,
+    .legal-content li {
+      line-height: 1.7;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .footer-links a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .footer-links a:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 700px) {
+      .contact-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .contact-form {
+        padding: 18px;
+      }
+    }
+  </style>
+
+</head>
+
+
+<body>
+
+<header class="topbar">
+
+  <a
+    class="brand"
+    href="/"
+    aria-label="YepFootball home"
+  >
+
+    <span class="logo">
+      YF
+    </span>
+
+    <span>
+      YepFootball
+    </span>
+
+  </a>
+
+
+  <nav>
+
+    <a href="#scores">
+      Scores
+    </a>
+
+    <a href="#fixtures">
+      Fixtures
+    </a>
+
+    <a href="#news">
+      News
+    </a>
+
+    <a href="#videos">
+      Videos
+    </a>
+
+  </nav>
+
+</header>
+
+
+<main>
+
+
+  <!-- =====================================================
+       HERO
+       ===================================================== -->
+
+  <section class="hero">
+
+    <div class="hero-copy">
+
+      <div class="eyebrow">
+        EUROPEAN FOOTBALL · 2026/27
+      </div>
+
+
+      <h1>
+        Football.<br>
+        <span>
+          Everywhere.
+        </span>
+      </h1>
+
+
+      <p>
+        Live scores, fixtures, European football news
+        and official videos — in one fast, simple place.
+      </p>
+
+
+      <div class="hero-actions">
+
+        <a
+          class="btn primary"
+          href="#scores"
+        >
+          See scores
+        </a>
+
+
+        <a
+          class="btn"
+          href="#fixtures"
+        >
+          Upcoming fixtures
+        </a>
+
+      </div>
+
+
+      <small id="updated">
+        Updating data…
+      </small>
+
+    </div>
+
+
+    <div class="hero-match">
+
+      <div class="match-head">
+
+        <span>
+          European Match Centre
+        </span>
+
+        <b>
+          ● LIVE DATA
+        </b>
+
+      </div>
+
+
+      <div class="scoreline">
+
+        <div>
+
+          <span class="team-badge">
+            YF
+          </span>
+
+          <strong>
+            YepFootball
+          </strong>
+
+        </div>
+
+
+        <div class="big-score">
+          — <i>—</i> —
+        </div>
+
+
+        <div>
+
+          <span class="team-badge alt">
+            EU
+          </span>
+
+          <strong>
+            Europe
+          </strong>
+
+        </div>
+
+      </div>
+
+
+      <p class="muted">
+        Select a competition below to see current matches.
+      </p>
+
+    </div>
+
+  </section>
+
+
+  <!-- =====================================================
+       SCORES
+       ===================================================== -->
+
+  <section
+    id="scores"
+    class="section dark"
+  >
+
+    <div class="section-title">
+
+      <div>
+
+        <div class="eyebrow">
+          MATCH CENTRE
+        </div>
+
+        <h2>
+          Scores
+        </h2>
+
+      </div>
+
+
+      <span
+        id="scores-status"
+        class="status"
+      >
+        Loading…
+      </span>
+
+    </div>
+
+
+    <div
+      class="tabs"
+      id="league-tabs"
+    ></div>
+
+
+    <div
+      id="scores-grid"
+      class="cards-grid"
+    >
+
+      <div class="empty">
+        Loading today's matches…
+      </div>
+
+    </div>
+
+  </section>
+
+
+  <!-- =====================================================
+       FIXTURES
+       ===================================================== -->
+
+  <section
+    id="fixtures"
+    class="section light"
+  >
+
+    <div class="section-title">
+
+      <div>
+
+        <div class="eyebrow">
+          2026/27 CALENDAR
+        </div>
+
+        <h2>
+          Upcoming fixtures
+        </h2>
+
+        <p
+          id="fixtures-message"
+          class="muted"
+          style="display:none"
+        ></p>
+
+      </div>
+
+
+      <span
+        id="fixtures-window"
+        class="muted"
+      >
+        Searching…
+      </span>
+
+    </div>
+
+
+    <div
+      id="fixtures-grid"
+      class="cards-grid"
+    >
+
+      <div class="empty">
+        Loading fixtures…
+      </div>
+
+    </div>
+
+  </section>
+
+
+  <!-- =====================================================
+       NEWS
+       ===================================================== -->
+
+  <section
+    id="news"
+    class="section dark"
+  >
+
+    <div class="section-title">
+
+      <div>
+
+        <div class="eyebrow">
+          UPDATED AUTOMATICALLY
+        </div>
+
+        <h2>
+          European football news
+        </h2>
+
+        <p class="muted">
+          Latest football stories, refreshed automatically.
+        </p>
+
+      </div>
+
+
+      <span class="status">
+        ● Daily feed
+      </span>
+
+    </div>
+
+
+    <div
+      id="news-grid"
+      class="news-grid"
+    >
+
+      <div class="empty">
+        Loading news…
+      </div>
+
+    </div>
+
+  </section>
+
+
+
+  <!-- =====================================================
+       CONTACT
+       ===================================================== -->
+
+  <section id="contact" class="section contact-section">
+
+    <div class="section-title">
+      <div>
+        <div class="eyebrow">GET IN TOUCH</div>
+        <h2>Contact us</h2>
+      </div>
+    </div>
+
+    <div class="contact-layout">
+
+      <div class="contact-info">
+        <h3>We'd like to hear from you</h3>
+
+        <p>
+          Have a question, suggestion, correction or feedback about
+          YepFootball? Send us a message and we'll get back to you.
+        </p>
+
+        <p class="muted">
+          Please provide a valid email address so that we can reply to you.
+        </p>
+
+        <div class="contact-details">
+          <div>Football scores, fixtures, news and official videos.</div>
+          <div>
+            <a href="#about">About us</a>
+          </div>
+          <div>
+            <a href="#terms">Terms and Conditions</a>
+          </div>
+        </div>
+      </div>
+
+      <form
+        id="contact-form"
+        class="contact-form"
+        novalidate
+      >
+
+        <div class="contact-field">
+          <label for="contact-name">
+            Name <span class="contact-required">*</span>
+          </label>
+          <input
+            id="contact-name"
+            name="name"
+            type="text"
+            autocomplete="name"
+            maxlength="100"
+            required
+          >
+        </div>
+
+        <div class="contact-field">
+          <label for="contact-email">
+            Email <span class="contact-required">*</span>
+          </label>
+          <input
+            id="contact-email"
+            name="email"
+            type="email"
+            autocomplete="email"
+            maxlength="254"
+            required
+          >
+        </div>
+
+        <div class="contact-field">
+          <label for="contact-subject">
+            Subject <span class="contact-required">*</span>
+          </label>
+          <input
+            id="contact-subject"
+            name="subject"
+            type="text"
+            maxlength="150"
+            required
+          >
+        </div>
+
+        <div class="contact-field">
+          <label for="contact-message">
+            Message <span class="contact-required">*</span>
+          </label>
+          <textarea
+            id="contact-message"
+            name="message"
+            maxlength="5000"
+            required
+          ></textarea>
+        </div>
+
+        <!-- Honeypot spam field -->
+        <div class="contact-honeypot" aria-hidden="true">
+          <label for="contact-website">Website</label>
+          <input
+            id="contact-website"
+            name="website"
+            type="text"
+            tabindex="-1"
+            autocomplete="off"
+          >
+        </div>
+
+        <button
+          id="contact-submit"
+          class="btn primary"
+          type="submit"
+        >
+          Send message
+        </button>
+
+        <p
+          id="contact-status"
+          class="contact-status"
+          role="status"
+          aria-live="polite"
+        ></p>
+
+      </form>
+
+    </div>
+
+  </section>
+
+
+  <!-- =====================================================
+       ABOUT US
+       ===================================================== -->
+
+  <section id="about" class="section light">
+
+    <div class="legal-content">
+
+      <div class="eyebrow">ABOUT YEPFOOTBALL</div>
+
+      <h2>About us</h2>
+
+      <p>
+        YepFootball brings together European football scores, upcoming
+        fixtures, football news and official video content in one simple,
+        fast and easy-to-use website.
+      </p>
+
+      <p>
+        Our aim is to make football information easy to find and enjoyable
+        to follow across desktop and mobile devices.
+      </p>
+
+      <p>
+        YepFootball is an independent website and is not affiliated with
+        UEFA, the Premier League, LaLiga or any football club featured on
+        the website.
+      </p>
+
+    </div>
+
+  </section>
+
+
+  <!-- =====================================================
+       TERMS AND CONDITIONS
+       ===================================================== -->
+
+  <section id="terms" class="section light">
+
+    <div class="legal-content">
+
+      <div class="eyebrow">LEGAL</div>
+
+      <h2>Terms and Conditions</h2>
+
+      <h3>1. Website use</h3>
+
+      <p>
+        YepFootball provides football information for general informational
+        and entertainment purposes. We aim to keep the information accurate
+        and current, but we do not guarantee that scores, fixtures, news,
+        videos or other information will always be complete, accurate,
+        current or available.
+      </p>
+
+      <h3>2. Third-party content</h3>
+
+      <p>
+        Some information, links and video content are provided by third-party
+        services and official football organisations. Such content remains
+        subject to the terms and policies of the relevant third party.
+      </p>
+
+      <h3>3. External links</h3>
+
+      <p>
+        YepFootball may link to external websites. We are not responsible
+        for the content, availability, security or privacy practices of
+        external websites.
+      </p>
+
+      <h3>4. Contact form</h3>
+
+      <p>
+        Information submitted through the contact form is used to respond
+        to your enquiry. Please do not submit passwords, payment information
+        or other confidential information through the form.
+      </p>
+
+      <h3>5. Changes</h3>
+
+      <p>
+        We may update these terms from time to time as YepFootball develops.
+        The latest version will be published on this page.
+      </p>
+
+    </div>
+
+  </section>
+
+
+  <!-- =====================================================
+       VIDEOS
+       ===================================================== -->
+
+  <section
+    id="videos"
+    class="section light"
+  >
+
+    <div class="section-title">
+
+      <div>
+
+        <div class="eyebrow">
+          WATCH
+        </div>
+
+        <h2>
+          Football videos
+        </h2>
+
+      </div>
+
+
+      <span class="muted">
+        Official channels &#8599;
+      </span>
+
+    </div>
+
+
+    <div class="video-grid">
+
+
+      <a
+        class="video-card"
+        href="https://www.youtube.com/@ChampionsLeague"
+        target="_blank"
+        rel="noopener"
+      >
+
+        <div class="video-image cl">
+
+          <span>
+            ▶
+          </span>
+
+        </div>
+
+        <div>
+
+          <small>
+            UEFA · HIGHLIGHTS
+          </small>
+
+          <strong>
+            Champions League videos
+          </strong>
+
+        </div>
+
+      </a>
+
+
+      <a
+        class="video-card"
+        href="https://www.youtube.com/@premierleague"
+        target="_blank"
+        rel="noopener"
+      >
+
+        <div class="video-image pl">
+
+          <span>
+            ▶
+          </span>
+
+        </div>
+
+        <div>
+
+          <small>
+            PREMIER LEAGUE
+          </small>
+
+          <strong>
+            Matchday highlights & features
+          </strong>
+
+        </div>
+
+      </a>
+
+
+      <a
+        class="video-card"
+        href="https://www.youtube.com/@LaLiga"
+        target="_blank"
+        rel="noopener"
+      >
+
+        <div class="video-image ll">
+
+          <span>
+            ▶
+          </span>
+
+        </div>
+
+        <div>
+
+          <small>
+            LA LIGA
+          </small>
+
+          <strong>
+            Goals, skills and best moments
+          </strong>
+
+        </div>
+
+      </a>
+
+
+    </div>
+
+  </section>
+
+</main>
+
+
+<!-- =======================================================
+     FOOTER
+     ======================================================= -->
+
+<footer>
+
+  <strong>
+    YepFootball
+  </strong>
+
+  <span>
+    European football scores, fixtures, news and videos.
+  </span>
+
+  <span>
+    ©
+    <span id="year"></span>
+    YepFootball
+  </span>
+
+  <nav class="footer-links" aria-label="Footer">
+    <a href="#about">About us</a>
+    <a href="#terms">Terms and Conditions</a>
+    <a href="#contact">Contact</a>
+  </nav>
+
+</footer>
+
+
+<script
+  src="/app.js"
+  defer
+></script>
+
+</body>
+
+</html>
