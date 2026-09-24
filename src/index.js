@@ -111,7 +111,7 @@ const FD_CODES = COMPETITIONS
 const VIDEO_CHANNELS = [
   {
     category: "UEFA",
-    channelId: "UCqZQlzSHbVJrwrn5XvY0VJg"
+    channelId: "UCyGa1YEx9ST66rYrJTGIKOw"
   },
   {
     category: "Premier League",
