@@ -1769,144 +1769,109 @@ function getVideoURL(
 /* =========================================================
    VIDEO CARD
    ========================================================= */
+function videoCard(video) {
 
-function videoCard(
-  video
-) {
+  const category = normaliseVideoCategory(
+    video.category ||
+    video.source ||
+    video.competition
+  );
+
+  /*
+   * UEFA must always open the official UEFA YouTube channel.
+   */
+  const url =
+    category === "UEFA"
+      ? "https://www.youtube.com/@uefa"
+      : (
+          video.url ||
+          video.videoURL ||
+          video.videoUrl ||
+          video.link ||
+          (
+            video.videoId
+              ? `https://www.youtube.com/watch?v=${encodeURIComponent(video.videoId)}`
+              : "#"
+          )
+        );
+
+  const thumbnail = getVideoThumbnail(video);
 
   const title =
     video.title ||
     "Football video";
 
+  const source =
+    video.source ||
+    category ||
+    "Football";
 
-  const category =
-    normaliseVideoCategory(
-      video.category ||
-      video.source ||
-      video.competition
-    );
-
-
-  const thumbnail =
-    getVideoThumbnail(
-      video
-    );
-
-
-  const url =
-    getVideoURL(
-      video
-    );
-
+  const published =
+    video.published ||
+    video.updated ||
+    "";
 
   return `
     <article class="video-card">
 
-
       <a
         class="video-image"
-        href="${escapeHTML(
-          url
-        )}"
+        href="${url}"
         target="_blank"
         rel="noopener noreferrer"
       >
-
 
         ${
           thumbnail
             ? `
               <img
-                src="${escapeHTML(
-                  thumbnail
-                )}"
-                alt="${escapeHTML(
-                  title
-                )}"
+                src="${thumbnail}"
+                alt="${escapeHTML(title)}"
                 loading="lazy"
-                onerror="
-                  this.style.display='none';
-                  this.parentElement.classList.add(
-                    'video-no-image'
-                  );
-                "
               >
             `
             : `
               <div class="video-placeholder">
-                ⚽
+                ▶
               </div>
             `
         }
 
-
-        <span
-          class="video-play"
-          aria-label="Play video"
-        >
-          ▶
-        </span>
-
+        <span class="video-play">▶</span>
 
       </a>
 
-
       <div class="video-content">
 
-
         <div class="video-meta">
-
-          ${escapeHTML(
-            category
-          )}
-
+          ${escapeHTML(source)}
         </div>
 
-
         <h3>
-
           <a
-            href="${escapeHTML(
-              url
-            )}"
+            href="${url}"
             target="_blank"
             rel="noopener noreferrer"
           >
-
-            ${escapeHTML(
-              title
-            )}
-
+            ${escapeHTML(title)}
           </a>
-
         </h3>
 
-
         ${
-          video.published ||
-          video.pubDate ||
-          video.date
+          published
             ? `
               <small>
-                ${escapeHTML(
-                  formatDate(
-                    video.published ||
-                    video.pubDate ||
-                    video.date
-                  )
-                )}
+                ${escapeHTML(formatDate(published))}
               </small>
             `
             : ""
         }
-
 
       </div>
 
     </article>
   `;
 }
-
 
 /* =========================================================
    VIDEO TABS
