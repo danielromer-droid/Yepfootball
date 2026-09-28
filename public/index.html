@@ -1,640 +1,224 @@
 <!doctype html>
 <html lang="en">
-
 <head>
-
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>YepFootball — Live scores, fixtures, news and highlights</title>
+  <meta name="description" content="Live scores, results, fixtures, news and official highlights from the Champions League, Premier League, La Liga, Serie A, Bundesliga and Ligue 1 — with a daily AI matchday briefing.">
+  <meta name="theme-color" content="#0b2a1f">
+  <link rel="canonical" href="https://yepfootball.com/">
 
-  <meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
-  >
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="YepFootball">
+  <meta property="og:title" content="YepFootball — European football, as it happens">
+  <meta property="og:description" content="Live scores, fixtures, news and official highlights from Europe's top competitions.">
+  <meta property="og:url" content="https://yepfootball.com/">
+  <meta property="og:image" content="https://yepfootball.com/og-image.png">
+  <meta name="twitter:card" content="summary_large_image">
 
-  <meta
-    name="description"
-    content="YepFootball — European football scores, fixtures, news and videos."
-  >
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
 
-  <title>
-    YepFootball — European Football
-  </title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=Instrument+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/styles.css">
 
-  <link
-    rel="stylesheet"
-    href="/styles.css"
-  >
-
-
-  <style>
-    /* Footer alignment */
-    footer {
-      display: flex;
-      align-items: center;
-      gap: 28px;
-      flex-wrap: wrap;
-    }
-
-    .footer-links {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 24px;
-      flex-wrap: wrap;
-      margin-top: 0;
-      margin-left: auto;
-    }
-
-    .footer-links a {
-      color: inherit;
-      text-decoration: none;
-      white-space: nowrap;
-    }
-
-    .footer-links a:hover {
-      text-decoration: underline;
-    }
-
-    .legal-content {
-      max-width: 900px;
-    }
-
-    .legal-content p {
-      line-height: 1.7;
-    }
-
-    @media (max-width: 800px) {
-      footer {
-        justify-content: center;
-        text-align: center;
-      }
-
-      .footer-links {
-        margin-left: 0;
-        width: 100%;
-        justify-content: center;
-      }
-    }
-  </style>
-
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "YepFootball",
+    "url": "https://yepfootball.com/",
+    "description": "European football scores, fixtures, news and videos."
+  }
+  </script>
 </head>
 
-
 <body>
+<a class="skip-link" href="#scores">Skip to scores</a>
 
 <header class="topbar">
-
-  <a
-    class="brand"
-    href="/"
-    aria-label="YepFootball home"
-  >
-
-    <span class="logo">
-      YF
-    </span>
-
-    <span>
-      YepFootball
-    </span>
-
+  <a class="brand" href="/" aria-label="YepFootball home">
+    <span class="logo" aria-hidden="true">YF</span>
+    <span>YepFootball</span>
   </a>
-
-
-  <nav>
-
-    <a href="#scores">
-      Scores
-    </a>
-
-    <a href="#fixtures">
-      Fixtures
-    </a>
-
-    <a href="#news">
-      News
-    </a>
-
-    <a href="#videos">
-      Videos
-    </a>
-
+  <nav aria-label="Sections">
+    <a href="#scores">Scores</a>
+    <a href="#fixtures">Fixtures</a>
+    <a href="#news">News</a>
+    <a href="#videos">Videos</a>
   </nav>
-
 </header>
 
+<div class="ticker" aria-label="Latest scores">
+  <div class="ticker-track" id="ticker">
+    <span class="ticker-empty">Loading latest scores…</span>
+  </div>
+</div>
 
-<main>
+<main id="main">
 
-
-  <!-- =====================================================
-       HERO
-       ===================================================== -->
-
-  <section class="hero">
-
-    <div class="hero-copy">
-
-      <div class="eyebrow">
-        EUROPEAN FOOTBALL · 2026/27
-      </div>
-
-
-      <h1>
-        Football.<br>
-        <span>
-          Everywhere.
-        </span>
-      </h1>
-
-
-      <p>
-        Live scores, fixtures, European football news
-        and official videos — in one fast, simple place.
-      </p>
-
-
-      <div class="hero-actions">
-
-        <a
-          class="btn primary"
-          href="#scores"
-        >
-          See scores
-        </a>
-
-
-        <a
-          class="btn"
-          href="#fixtures"
-        >
-          Upcoming fixtures
-        </a>
-
-      </div>
-
-
-      <small id="updated">
-        Updating data…
-      </small>
-
+  <!-- ===================== HERO / AI BRIEFING ===================== -->
+  <section class="hero" aria-labelledby="brief-headline">
+    <div class="pitch-lines" aria-hidden="true">
+      <svg viewBox="0 0 1200 600" preserveAspectRatio="xMidYMid slice">
+        <line x1="760" y1="-10" x2="760" y2="610" />
+        <circle cx="760" cy="300" r="170" />
+        <circle cx="760" cy="300" r="5" class="spot" />
+      </svg>
     </div>
 
-
-    <div class="hero-match">
-
-      <div class="match-head">
-
-        <span>
-          European Match Centre
-        </span>
-
-        <b>
-          ● LIVE DATA
-        </b>
-
-      </div>
-
-
-      <div class="scoreline">
-
-        <div>
-
-          <span class="team-badge">
-            YF
-          </span>
-
-          <strong>
-            YepFootball
-          </strong>
-
-        </div>
-
-
-        <div class="big-score">
-          — <i>—</i> —
-        </div>
-
-
-        <div>
-
-          <span class="team-badge alt">
-            EU
-          </span>
-
-          <strong>
-            Europe
-          </strong>
-
-        </div>
-
-      </div>
-
-
-      <p class="muted">
-        Select a competition below to see current matches.
-      </p>
-
-    </div>
-
-  </section>
-
-
-  <!-- =====================================================
-       SCORES
-       ===================================================== -->
-
-  <section
-    id="scores"
-    class="section dark"
-  >
-
-    <div class="section-title">
-
-      <div>
-
-        <div class="eyebrow">
-          MATCH CENTRE
-        </div>
-
-        <h2>
-          Scores
-        </h2>
-
-      </div>
-
-
-      <span
-        id="scores-status"
-        class="status"
-      >
-        Loading…
-      </span>
-
-    </div>
-
-
-    <div
-      class="tabs"
-      id="league-tabs"
-    ></div>
-
-
-    <div
-      id="scores-grid"
-      class="cards-grid"
-    >
-
-      <div class="empty">
-        Loading today's matches…
-      </div>
-
-    </div>
-
-  </section>
-
-
-  <!-- =====================================================
-       FIXTURES
-       ===================================================== -->
-
-  <section
-    id="fixtures"
-    class="section light"
-  >
-
-    <div class="section-title">
-
-      <div>
-
-        <div class="eyebrow">
-          2026/27 CALENDAR
-        </div>
-
-        <h2>
-          Upcoming fixtures
-        </h2>
-
-        <p
-          id="fixtures-message"
-          class="muted"
-          style="display:none"
-        ></p>
-
-      </div>
-
-
-      <span
-        id="fixtures-window"
-        class="muted"
-      >
-        Searching…
-      </span>
-
-    </div>
-
-
-    <div
-      id="fixtures-grid"
-      class="cards-grid"
-    >
-
-      <div class="empty">
-        Loading fixtures…
-      </div>
-
-    </div>
-
-  </section>
-
-
-  <!-- =====================================================
-       NEWS
-       ===================================================== -->
-
-  <section
-    id="news"
-    class="section dark"
-  >
-
-    <div class="section-title">
-
-      <div>
-
-        <div class="eyebrow">
-          UPDATED AUTOMATICALLY
-        </div>
-
-        <h2>
-          European football news
-        </h2>
-
-        <p class="muted">
-          Latest football stories, refreshed automatically.
+    <div class="hero-inner">
+      <div class="hero-copy">
+        <p class="hero-date" id="hero-date"></p>
+        <h1 id="brief-headline">European football, as it happens</h1>
+        <p class="lede" id="brief-summary">
+          Live scores, results, fixtures, news and official highlights from the
+          Champions League and Europe's top five leagues.
         </p>
-
+        <ul class="brief-points" id="brief-points" hidden></ul>
+        <p class="ai-note" id="brief-note" hidden>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1l1.6 4.4L14 7l-4.4 1.6L8 13l-1.6-4.4L2 7l4.4-1.6z"/></svg>
+          <span id="brief-note-text"></span>
+        </p>
+        <div class="hero-actions">
+          <a class="btn primary" href="#scores">See scores</a>
+          <a class="btn" href="#fixtures">Upcoming fixtures</a>
+        </div>
       </div>
 
-
-      <span class="status">
-        ● Daily feed
-      </span>
-
+      <aside class="scoreboard" id="hero-match" aria-live="polite" aria-label="Featured match">
+        <div class="sb-head"><span>Featured match</span></div>
+        <div class="sb-body sb-loading">
+          <span class="sb-digits">– : –</span>
+        </div>
+      </aside>
     </div>
-
-
-    <div
-      id="news-grid"
-      class="news-grid"
-    >
-
-      <div class="empty">
-        Loading news…
-      </div>
-
-    </div>
-
   </section>
 
-
-  <!-- =====================================================
-       VIDEOS
-       ===================================================== -->
-
-  <section
-    id="videos"
-    class="section light"
-  >
-
-    <div class="section-title">
-
+  <!-- ===================== SCORES ===================== -->
+  <section id="scores" class="section" aria-labelledby="scores-title">
+    <div class="section-head">
       <div>
-
-        <div class="eyebrow">
-          WATCH
-        </div>
-
-        <h2>
-          Football videos
-        </h2>
-
+        <h2 id="scores-title">Scores</h2>
+        <p class="section-sub">Live matches and the latest matchday in each competition.</p>
       </div>
-
-
-      <span class="muted">
-        Official channels &#8599;
-      </span>
-
+      <span id="scores-status" class="status" aria-live="polite">Loading…</span>
     </div>
-
-
-    <div class="video-grid">
-
-
-      <a
-        class="video-card"
-        href="https://www.youtube.com/@uefa"
-        target="_blank"
-        rel="noopener"
-      >
-
-        <div class="video-image cl">
-
-          <span>
-            ▶
-          </span>
-
-        </div>
-
-        <div>
-
-          <small>
-            UEFA · HIGHLIGHTS
-          </small>
-
-          <strong>
-            Champions League videos
-          </strong>
-
-        </div>
-
-      </a>
-
-
-      <a
-        class="video-card"
-        href="https://www.youtube.com/@premierleague"
-        target="_blank"
-        rel="noopener"
-      >
-
-        <div class="video-image pl">
-
-          <span>
-            ▶
-          </span>
-
-        </div>
-
-        <div>
-
-          <small>
-            PREMIER LEAGUE
-          </small>
-
-          <strong>
-            Matchday highlights & features
-          </strong>
-
-        </div>
-
-      </a>
-
-
-      <a
-        class="video-card"
-        href="https://www.youtube.com/@LaLiga"
-        target="_blank"
-        rel="noopener"
-      >
-
-        <div class="video-image ll">
-
-          <span>
-            ▶
-          </span>
-
-        </div>
-
-        <div>
-
-          <small>
-            LA LIGA
-          </small>
-
-          <strong>
-            Goals, skills and best moments
-          </strong>
-
-        </div>
-
-      </a>
-
-
+    <div class="chips" id="league-tabs" role="toolbar" aria-label="Filter scores by competition"></div>
+    <div id="scores-grid" class="league-columns">
+      <div class="empty">Loading the latest scores…</div>
     </div>
+  </section>
 
+  <!-- ===================== FIXTURES ===================== -->
+  <section id="fixtures" class="section section-alt" aria-labelledby="fixtures-title">
+    <div class="section-head">
+      <div>
+        <h2 id="fixtures-title">Fixtures</h2>
+        <p class="section-sub">Kick-off times are shown in your local time.</p>
+      </div>
+      <span id="fixtures-window" class="status">Searching…</span>
+    </div>
+    <div class="chips" id="fixture-tabs" role="toolbar" aria-label="Filter fixtures by competition"></div>
+    <p id="fixtures-message" class="section-sub" hidden></p>
+    <div id="fixtures-grid" class="fixture-days">
+      <div class="empty">Loading fixtures…</div>
+    </div>
+    <button type="button" class="btn more" id="fixtures-more" hidden>Show more fixtures</button>
+  </section>
+
+  <!-- ===================== NEWS ===================== -->
+  <section id="news" class="section" aria-labelledby="news-title">
+    <div class="section-head">
+      <div>
+        <h2 id="news-title">News</h2>
+        <p class="section-sub">The latest football stories from BBC Sport.</p>
+      </div>
+      <span id="news-status" class="status"></span>
+    </div>
+    <div id="news-grid" class="news-layout">
+      <div class="empty">Loading news…</div>
+    </div>
+  </section>
+
+  <!-- ===================== VIDEOS ===================== -->
+  <section id="videos" class="section section-alt" aria-labelledby="videos-title">
+    <div class="section-head">
+      <div>
+        <h2 id="videos-title">Videos</h2>
+        <p class="section-sub">Highlights and features from official channels.</p>
+      </div>
+    </div>
+    <div class="chips" id="video-tabs" role="toolbar" aria-label="Filter videos by channel"></div>
+    <div id="videos-grid" class="video-grid">
+      <a class="video-card channel" href="https://www.youtube.com/@uefa" target="_blank" rel="noopener">
+        <span class="video-thumb cl"></span>
+        <span class="video-info"><small>UEFA</small><strong>Champions League videos</strong></span>
+      </a>
+      <a class="video-card channel" href="https://www.youtube.com/@premierleague" target="_blank" rel="noopener">
+        <span class="video-thumb pl"></span>
+        <span class="video-info"><small>Premier League</small><strong>Matchday highlights and features</strong></span>
+      </a>
+      <a class="video-card channel" href="https://www.youtube.com/@LaLiga" target="_blank" rel="noopener">
+        <span class="video-thumb ll"></span>
+        <span class="video-info"><small>LaLiga</small><strong>Goals, skills and best moments</strong></span>
+      </a>
+    </div>
+  </section>
+
+  <!-- ===================== ABOUT + TERMS ===================== -->
+  <section class="section info" aria-label="About and legal">
+    <div class="info-grid">
+      <div id="about">
+        <h2>About us</h2>
+        <p>
+          YepFootball brings together European football scores, upcoming fixtures,
+          football news and official video content in one simple, easy-to-use website.
+        </p>
+        <p>
+          YepFootball is an independent website and is not affiliated with UEFA,
+          the Premier League, LaLiga or any football club featured on the website.
+        </p>
+      </div>
+      <div id="terms">
+        <h2>Terms and conditions</h2>
+        <p>
+          YepFootball provides football information for general informational and
+          entertainment purposes. We aim to keep information accurate and current, but
+          do not guarantee that scores, fixtures, news, videos or other information will
+          always be complete or available.
+        </p>
+        <p>
+          The matchday briefing is written automatically by an AI model using only the
+          results and headlines shown on this page. It can make mistakes; the scores and
+          fixtures sections are the authoritative source.
+        </p>
+        <p>
+          Some content and links are provided by third-party services and football
+          organisations and remain subject to their own terms. YepFootball may link to
+          external websites and is not responsible for their content, availability or policies.
+        </p>
+      </div>
+    </div>
   </section>
 
 </main>
 
-
-
-  <!-- =====================================================
-       ABOUT US
-       ===================================================== -->
-
-  <section id="about" class="section light">
-
-    <div class="legal-content">
-
-      <div class="eyebrow">ABOUT YEPFOOTBALL</div>
-
-      <h2>About us</h2>
-
-      <p>
-        YepFootball brings together European football scores, upcoming
-        fixtures, football news and official video content in one simple,
-        easy-to-use website.
-      </p>
-
-      <p>
-        YepFootball is an independent website and is not affiliated with
-        UEFA, the Premier League, LaLiga or any football club featured on
-        the website.
-      </p>
-
-    </div>
-
-  </section>
-
-
-  <!-- =====================================================
-       TERMS AND CONDITIONS
-       ===================================================== -->
-
-  <section id="terms" class="section light">
-
-    <div class="legal-content">
-
-      <div class="eyebrow">LEGAL</div>
-
-      <h2>Terms and Conditions</h2>
-
-      <p>
-        YepFootball provides football information for general informational
-        and entertainment purposes. We aim to keep information accurate and
-        current, but do not guarantee that scores, fixtures, news, videos
-        or other information will always be complete or available.
-      </p>
-
-      <p>
-        Some content and links are provided by third-party services and
-        football organisations and remain subject to their own terms.
-      </p>
-
-      <p>
-        YepFootball may link to external websites and is not responsible
-        for their content, availability or policies.
-      </p>
-
-    </div>
-
-  </section>
-
-
-<!-- =======================================================
-     FOOTER
-     ======================================================= -->
-
-<footer>
-
-  <strong>
-    YepFootball
-  </strong>
-
-  <span>
-    European football scores, fixtures, news and videos.
-  </span>
-
-  <div class="footer-links">
-
-    <a href="mailto:contact@yepfootball.com">
-      contact@yepfootball.com
-    </a>
-
-    <a href="#about">
-      About us
-    </a>
-
-    <a href="#terms">
-      Terms and Conditions
-    </a>
-
+<footer class="site-footer">
+  <div class="footer-brand">
+    <strong>YepFootball</strong>
+    <span>European football scores, fixtures, news and videos.</span>
   </div>
-
-  <span>
-    ©
-    <span id="year"></span>
-    YepFootball
-  </span>
-
+  <div class="footer-links">
+    <a href="mailto:contact@yepfootball.com">contact@yepfootball.com</a>
+    <a href="#about">About us</a>
+    <a href="#terms">Terms and conditions</a>
+  </div>
+  <span class="footer-copy">© <span id="year"></span> YepFootball</span>
 </footer>
 
-
-<script
-  src="/app.js"
-  defer
-></script>
-
+<script src="/app.js" defer></script>
 </body>
-
 </html>

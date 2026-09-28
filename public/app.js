@@ -1,2382 +1,674 @@
 /* =========================================================
-   YepFootball
-   Frontend application
-   Scores / Fixtures / News / Videos
+   YepFootball — front end
+   Briefing / Ticker / Scores / Fixtures / News / Videos
    ========================================================= */
 
+"use strict";
 
-/* =========================================================
-   LEAGUES
-   ========================================================= */
+/* ---------------- Config ---------------- */
 
 const LEAGUES = [
-  {
-    id: null,
-    code: "ALL",
-    name: "All"
-  },
-
-  {
-    id: 2,
-    code: "CL",
-    name: "Champions League"
-  },
-
-  {
-    id: 3,
-    code: "EL",
-    name: "Europa League"
-  },
-
-  {
-    id: 848,
-    code: "ECL",
-    name: "Conference League"
-  },
-
-  {
-    id: 39,
-    code: "PL",
-    name: "Premier League"
-  },
-
-  {
-    id: 140,
-    code: "PD",
-    name: "La Liga"
-  },
-
-  {
-    id: 135,
-    code: "SA",
-    name: "Serie A"
-  },
-
-  {
-    id: 78,
-    code: "BL1",
-    name: "Bundesliga"
-  },
-
-  {
-    id: 61,
-    code: "FL1",
-    name: "Ligue 1"
-  }
+  { id: 2,   code: "CL",  name: "Champions League",  short: "UCL",        color: "#3b82f6" },
+  { id: 3,   code: "EL",  name: "Europa League",     short: "UEL",        color: "#f97316" },
+  { id: 848, code: "ECL", name: "Conference League", short: "UECL",       color: "#22c55e" },
+  { id: 39,  code: "PL",  name: "Premier League",    short: "Premier Lg", color: "#a855f7" },
+  { id: 140, code: "PD",  name: "La Liga",           short: "La Liga",    color: "#ef4444" },
+  { id: 135, code: "SA",  name: "Serie A",           short: "Serie A",    color: "#06b6d4" },
+  { id: 78,  code: "BL1", name: "Bundesliga",        short: "Bundesliga", color: "#e11d48" },
+  { id: 61,  code: "FL1", name: "Ligue 1",           short: "Ligue 1",    color: "#eab308" }
 ];
 
+const LEAGUE_BY_ID = new Map(LEAGUES.map(l => [l.id, l]));
+const VIDEO_CATEGORIES = ["UEFA", "Premier League", "LaLiga"];
 
-const SCORE_LEAGUE_IDS =
-  new Set(
-    LEAGUES
-      .filter(
-        league => league.id !== null
-      )
-      .map(
-        league => league.id
-      )
-  );
+// These channels open on YouTube instead of playing inline
+// (kept from the previous site behaviour for UEFA).
+const OPEN_ON_YOUTUBE = new Set(["UEFA"]);
 
+const FINISHED = new Set(["FINISHED", "FT", "AET", "PEN", "AWARDED", "FINISHED_AET", "FINISHED_PEN"]);
+const LIVE = new Set(["1H", "2H", "HT", "ET", "BT", "P", "LIVE", "IN_PLAY", "PAUSED", "INT"]);
 
-/* =========================================================
-   CURRENT LEAGUE
-   ========================================================= */
+const FIXTURES_PAGE = 40;
 
-let currentLeague = null;
+const state = {
+  scores: null,
+  scoresLeague: null,
+  fixtures: [],
+  fixturesLeague: null,
+  fixturesShown: FIXTURES_PAGE,
+  videos: [],
+  videoCategory: "ALL"
+};
 
+/* ---------------- Helpers ---------------- */
 
-/* =========================================================
-   VIDEO CATEGORIES
-   ========================================================= */
+const $ = id => document.getElementById(id);
 
-const VIDEO_CATEGORIES = [
-  "UEFA",
-  "Premier League",
-  "LaLiga"
-];
-
-
-let allVideos = [];
-
-
-/* =========================================================
-   HTML ESCAPE
-   ========================================================= */
-
-function escapeHTML(value) {
-
+function esc(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+    .replace(/'/g, "&#39;");
 }
 
+const toDate = value => {
+  const d = new Date(value || 0);
+  return Number.isNaN(d.getTime()) || !value ? null : d;
+};
 
-/* =========================================================
-   DATE FORMAT
-   ========================================================= */
+const fmtTime = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
+const fmtDay = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short" });
+const fmtLongDay = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long" });
 
-function formatDate(date) {
+function dayKey(date) {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
 
-  if (!date) {
-    return "";
-  }
+function relativeDay(date) {
+  if (!date) return "";
+  const today = new Date();
+  const diff = Math.round(
+    (new Date(date.getFullYear(), date.getMonth(), date.getDate()) -
+      new Date(today.getFullYear(), today.getMonth(), today.getDate())) / 86400000
+  );
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Tomorrow";
+  if (diff === -1) return "Yesterday";
+  return fmtDay.format(date);
+}
 
-  const d =
-    new Date(date);
+function timeAgo(value) {
+  const date = toDate(value);
+  if (!date) return "";
+  const mins = Math.round((Date.now() - date.getTime()) / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return fmtDay.format(date);
+}
 
-  if (
-    Number.isNaN(
-      d.getTime()
-    )
-  ) {
-    return "";
-  }
+async function api(url) {
+  const response = await fetch(url, { headers: { Accept: "application/json" } });
+  const data = await response.json().catch(() => null);
+  if (!data) throw new Error(`${url} returned ${response.status}`);
+  return data;
+}
 
-  return d.toLocaleDateString(
-    "en-GB",
-    {
-      weekday: "short",
-      day: "numeric",
-      month: "short"
-    }
+const isLive = m => LIVE.has(String(m?.status || "").toUpperCase());
+const isFinished = m => FINISHED.has(String(m?.status || "").toUpperCase());
+const teamName = t => t?.shortName || t?.name || "TBC";
+
+function initials(name) {
+  return esc(
+    String(name || "?")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(w => w[0])
+      .join("")
+      .toUpperCase()
   );
 }
 
-
-/* =========================================================
-   LONG DATE FORMAT
-   ========================================================= */
-
-function formatLongDate(date) {
-
-  if (!date) {
-    return "";
+function crest(team) {
+  const name = teamName(team);
+  if (team?.crest) {
+    return `<img src="${esc(team.crest)}" alt="" loading="lazy" decoding="async" width="26" height="26" data-initials="${initials(name)}">`;
   }
+  return `<span class="crest-fallback" aria-hidden="true">${initials(name)}</span>`;
+}
 
-  const d =
-    new Date(date);
+function statusLabel(m) {
+  if (isLive(m)) {
+    const s = String(m.status).toUpperCase();
+    if (s === "HT") return "HT";
+    return m.minute != null ? `${m.minute}'` : "Live";
+  }
+  if (isFinished(m)) return "FT";
+  const d = toDate(m.date);
+  return d ? fmtTime.format(d) : "TBC";
+}
 
-  if (
-    Number.isNaN(
-      d.getTime()
+/* ---------------- Chips (shared) ---------------- */
+
+function renderChips(container, options, current, onPick) {
+  if (!container) return;
+  container.innerHTML = options
+    .map(
+      o => `<button type="button" class="chip" data-value="${esc(o.value ?? "")}"
+        aria-pressed="${String(o.value === current)}">
+        ${o.color ? `<span class="league-mark" style="--mark:${o.color}"></span>` : ""}
+        ${esc(o.label)}${o.count != null ? ` <span class="count">${o.count}</span>` : ""}
+      </button>`
     )
-  ) {
-    return "";
-  }
+    .join("");
 
-  return d.toLocaleDateString(
-    "en-GB",
-    {
-      day: "numeric",
-      month: "long",
-      year: "numeric"
-    }
-  );
+  container.querySelectorAll(".chip").forEach(button => {
+    button.addEventListener("click", () => {
+      const raw = button.dataset.value;
+      const option = options.find(o => String(o.value ?? "") === raw);
+      onPick(option ? option.value : null);
+    });
+  });
 }
 
-
-/* =========================================================
-   TIME FORMAT
-   ========================================================= */
-
-function formatTime(date) {
-
-  if (!date) {
-    return "";
-  }
-
-  const d =
-    new Date(date);
-
-  if (
-    Number.isNaN(
-      d.getTime()
-    )
-  ) {
-    return "";
-  }
-
-  return d.toLocaleTimeString(
-    "en-GB",
-    {
-      hour: "2-digit",
-      minute: "2-digit"
-    }
-  );
+function leagueOptions(matches) {
+  const counts = new Map();
+  matches.forEach(m => counts.set(Number(m.leagueId), (counts.get(Number(m.leagueId)) || 0) + 1));
+  return [
+    { value: null, label: "All", count: matches.length },
+    ...LEAGUES.filter(l => counts.has(l.id)).map(l => ({
+      value: l.id,
+      label: l.name,
+      color: l.color,
+      count: counts.get(l.id)
+    }))
+  ];
 }
 
+/* ---------------- Match row ---------------- */
 
-/* =========================================================
-   FETCH JSON
-   ========================================================= */
+function matchRow(m, { showLeague = false } = {}) {
+  const live = isLive(m);
+  const played = live || isFinished(m);
+  const hs = m.homeScore, as = m.awayScore;
+  let homeClass = "", awayClass = "";
 
-async function fetchJSON(url) {
-
-  const response =
-    await fetch(
-      url,
-      {
-        cache: "no-store"
-      }
-    );
-
-
-  if (!response.ok) {
-
-    throw new Error(
-      `HTTP ${response.status}`
-    );
+  if (isFinished(m) && hs != null && as != null && hs !== as) {
+    homeClass = hs > as ? "winner" : "loser";
+    awayClass = hs > as ? "loser" : "winner";
   }
 
+  const home = teamName(m.homeTeam);
+  const away = teamName(m.awayTeam);
+  const score = played ? `${hs ?? "–"}–${as ?? "–"}` : "v";
+  const league = LEAGUE_BY_ID.get(Number(m.leagueId));
 
-  return response.json();
+  return `
+    <li class="match${live ? " is-live" : ""}" aria-label="${esc(
+      `${home} ${played ? `${hs ?? ""} ${away} ${as ?? ""}` : `versus ${away}`}, ${statusLabel(m)}`
+    )}">
+      <span class="m-status">${live ? '<span class="live-dot" aria-hidden="true"></span>' : ""}${esc(statusLabel(m))}</span>
+      <span class="m-team home ${homeClass}"><span title="${esc(home)}">${esc(home)}</span>${crest(m.homeTeam)}</span>
+      <span class="m-score${played ? "" : " vs"}">${esc(score)}</span>
+      <span class="m-team away ${awayClass}">${crest(m.awayTeam)}<span title="${esc(away)}">${esc(away)}</span></span>
+      ${showLeague && league ? `<span class="m-league">${esc(league.name)}</span>` : ""}
+    </li>`;
 }
 
+/* ---------------- Hero date ---------------- */
 
-/* =========================================================
-   YEAR
-   ========================================================= */
+function renderHeroDate() {
+  const el = $("hero-date");
+  if (el) el.textContent = fmtLongDay.format(new Date());
+}
 
-function updateYear() {
+/* ---------------- AI briefing ---------------- */
 
-  const year =
-    document.getElementById(
-      "year"
-    );
+async function loadBriefing() {
+  try {
+    const data = await api("/api/briefing");
+    if (!data?.ok || !data.headline) return;
 
+    $("brief-headline").textContent = data.headline;
+    $("brief-summary").textContent = data.summary || "";
 
-  if (year) {
+    const points = $("brief-points");
+    const items = (data.points || []).filter(Boolean).slice(0, 3);
+    points.innerHTML = items.map(p => `<li>${esc(p)}</li>`).join("");
+    points.hidden = !items.length;
 
-    year.textContent =
-      new Date().getFullYear();
+    const updated = toDate(data.updated);
+    $("brief-note-text").textContent = data.ai
+      ? `AI summary of the latest results and BBC Sport headlines${updated ? `, updated ${fmtTime.format(updated)}` : ""}. Check the scores below for the official record.`
+      : `Summary of the latest results and headlines${updated ? `, updated ${fmtTime.format(updated)}` : ""}.`;
+    $("brief-note").hidden = false;
+  } catch (error) {
+    console.warn("YepFootball briefing:", error);
   }
 }
 
+/* ---------------- Scores ---------------- */
 
-/* =========================================================
-   LEAGUE TABS
-   ========================================================= */
+function allScoreMatches() {
+  const data = state.scores || {};
+  const live = Array.isArray(data.live) ? data.live : [];
+  const latest = Array.isArray(data.latestAvailable) && data.latestAvailable.length
+    ? data.latestAvailable
+    : Array.isArray(data.events) ? data.events : [];
 
-function renderLeagueTabs() {
+  const liveIds = new Set(live.map(m => `${m.leagueId}-${m.homeTeam?.name}-${m.awayTeam?.name}`));
+  const rest = latest.filter(m => !liveIds.has(`${m.leagueId}-${m.homeTeam?.name}-${m.awayTeam?.name}`));
 
-  const container =
-    document.getElementById(
-      "league-tabs"
-    );
+  return [...live, ...rest].filter(m => LEAGUE_BY_ID.has(Number(m.leagueId)));
+}
 
+function renderScores() {
+  const grid = $("scores-grid");
+  const status = $("scores-status");
+  const matches = allScoreMatches();
 
-  if (!container) {
-    return;
-  }
+  renderChips($("league-tabs"), leagueOptions(matches), state.scoresLeague, value => {
+    state.scoresLeague = value;
+    renderScores();
+  });
 
+  const filtered = state.scoresLeague == null
+    ? matches
+    : matches.filter(m => Number(m.leagueId) === state.scoresLeague);
 
-  container.innerHTML =
-    LEAGUES
-      .map(
-        league => {
+  if (!filtered.length) {
+    grid.innerHTML = `<div class="empty">No recent scores for this competition yet. Try another competition or check back after the next matchday.</div>`;
+  } else {
+    const groups = new Map();
+    filtered.forEach(m => {
+      const id = Number(m.leagueId);
+      if (!groups.has(id)) groups.set(id, []);
+      groups.get(id).push(m);
+    });
 
-          const active =
-            league.id ===
-            currentLeague
-              ? " active"
-              : "";
+    grid.innerHTML = LEAGUES.filter(l => groups.has(l.id))
+      .map(league => {
+        const list = groups.get(league.id).sort((a, b) => {
+          if (isLive(a) !== isLive(b)) return isLive(a) ? -1 : 1;
+          return (toDate(a.date) || 0) - (toDate(b.date) || 0);
+        });
+        const liveCount = list.filter(isLive).length;
+        const latest = list.map(m => toDate(m.date)).filter(Boolean).sort((a, b) => b - a)[0];
+        const sub = liveCount
+          ? `<small style="color:var(--live)"><span class="live-dot" aria-hidden="true"></span>${liveCount} live</small>`
+          : `<small>${esc(relativeDay(latest))}</small>`;
 
-
-          return `
-            <button
-              type="button"
-              class="tab${active}"
-              data-league-id="${
-                league.id ?? ""
-              }"
-            >
-              ${escapeHTML(
-                league.name
-              )}
-            </button>
-          `;
-        }
-      )
+        return `
+          <article class="league-block">
+            <header class="block-head">
+              <h3><span class="league-mark" style="--mark:${league.color}"></span>${esc(league.name)}</h3>
+              ${sub}
+            </header>
+            <ul class="match-list">${list.map(m => matchRow(m)).join("")}</ul>
+          </article>`;
+      })
       .join("");
-
-
-  container
-    .querySelectorAll(
-      ".tab"
-    )
-    .forEach(
-      button => {
-
-        button.addEventListener(
-          "click",
-          () => {
-
-            const value =
-              button.dataset.leagueId;
-
-
-            currentLeague =
-              value === ""
-                ? null
-                : Number(value);
-
-
-            renderLeagueTabs();
-
-            loadScores();
-
-          }
-        );
-      }
-    );
-}
-
-
-/* =========================================================
-   SCORE STATUS
-   ========================================================= */
-
-function getScoreStatusText(
-  match
-) {
-
-  const status =
-    String(
-      match?.status || ""
-    ).toUpperCase();
-
-
-  if (
-    status === "FINISHED" ||
-    status === "FT" ||
-    status === "AET" ||
-    status === "PEN"
-  ) {
-
-    return "FT";
   }
 
+  const liveTotal = matches.filter(isLive).length;
+  const updated = toDate(state.scores?.updated);
+  status.innerHTML = liveTotal
+    ? `<span class="live-dot" aria-hidden="true"></span>${liveTotal} live now`
+    : updated ? `Updated ${esc(fmtTime.format(updated))}` : "";
 
-  if (
-    [
-      "1H",
-      "2H",
-      "HT",
-      "ET",
-      "P"
-    ].includes(status)
-  ) {
-
-    return "LIVE";
-  }
-
-
-  if (
-    status === "TIMED" ||
-    status === "NS"
-  ) {
-
-    return "UPCOMING";
-  }
-
-
-  return status || "";
+  renderTicker(matches);
+  renderFeatured(matches);
 }
-
-
-/* =========================================================
-   SCORE CARD
-   ========================================================= */
-
-function scoreCard(
-  match
-) {
-
-  const home =
-    match.homeTeam || {};
-
-
-  const away =
-    match.awayTeam || {};
-
-
-  const homeName =
-    home.shortName ||
-    home.name ||
-    "Home";
-
-
-  const awayName =
-    away.shortName ||
-    away.name ||
-    "Away";
-
-
-  const homeScore =
-    match.homeScore ??
-    "–";
-
-
-  const awayScore =
-    match.awayScore ??
-    "–";
-
-
-  const status =
-    getScoreStatusText(
-      match
-    );
-
-
-  return `
-    <article class="score-card">
-
-      <div class="card-top">
-
-        <span>
-          ${escapeHTML(
-            match.league || ""
-          )}
-        </span>
-
-        <b>
-          ${escapeHTML(
-            status
-          )}
-        </b>
-
-      </div>
-
-
-      <div class="match-time">
-
-        ${escapeHTML(
-          formatTime(
-            match.date
-          )
-        )}
-
-      </div>
-
-
-      <div class="teams">
-
-
-        <div class="team">
-
-          ${
-            home.crest
-              ? `
-                <img
-                  src="${escapeHTML(
-                    home.crest
-                  )}"
-                  alt=""
-                  loading="lazy"
-                >
-              `
-              : `
-                <span class="team-badge">
-                  ⚽
-                </span>
-              `
-          }
-
-          <strong>
-            ${escapeHTML(
-              homeName
-            )}
-          </strong>
-
-        </div>
-
-
-        <div class="score">
-
-          <span>
-            ${escapeHTML(
-              homeScore
-            )}
-          </span>
-
-          <span>–</span>
-
-          <span>
-            ${escapeHTML(
-              awayScore
-            )}
-          </span>
-
-        </div>
-
-
-        <div class="team">
-
-          ${
-            away.crest
-              ? `
-                <img
-                  src="${escapeHTML(
-                    away.crest
-                  )}"
-                  alt=""
-                  loading="lazy"
-                >
-              `
-              : `
-                <span class="team-badge">
-                  ⚽
-                </span>
-              `
-          }
-
-          <strong>
-            ${escapeHTML(
-              awayName
-            )}
-          </strong>
-
-        </div>
-
-      </div>
-
-    </article>
-  `;
-}
-
-
-/* =========================================================
-   SCORE LEAGUE HEADING
-   ========================================================= */
-
-/* =========================================================
-   SCORE LEAGUE HEADING
-   ========================================================= */
-
-function scoreLeagueHeading(
-  leagueName,
-  date
-) {
-
-  return `
-    <div
-      class="score-day-heading"
-      style="display:flex;align-items:center;gap:8px;"
-    >
-
-      <span>
-        ${escapeHTML(
-          leagueName
-        )}
-      </span>
-
-      <small>
-        ${escapeHTML(
-          formatLongDate(
-            date
-          )
-        )}
-      </small>
-
-    </div>
-  `;
-}
-/* =========================================================
-   GROUP SCORES BY LEAGUE
-   ========================================================= */
-
-function groupScoresByLeague(
-  events
-) {
-
-  const groups =
-    new Map();
-
-
-  events.forEach(
-    match => {
-
-      const leagueId =
-        Number(
-          match?.leagueId
-        );
-
-
-      if (
-        !SCORE_LEAGUE_IDS.has(
-          leagueId
-        )
-      ) {
-        return;
-      }
-
-
-      if (
-        currentLeague !== null &&
-        leagueId !==
-          currentLeague
-      ) {
-        return;
-      }
-
-
-      if (
-        !groups.has(
-          leagueId
-        )
-      ) {
-
-        groups.set(
-          leagueId,
-          []
-        );
-      }
-
-
-      groups
-        .get(leagueId)
-        .push(match);
-
-    }
-  );
-
-
-  return groups;
-}
-
-
-/* =========================================================
-   LEAGUE ORDER
-   ========================================================= */
-
-function leagueOrder(
-  leagueId
-) {
-
-  const index =
-    LEAGUES.findIndex(
-      league =>
-        Number(
-          league.id
-        ) ===
-        Number(
-          leagueId
-        )
-    );
-
-
-  return index < 0
-    ? 999
-    : index;
-}
-
-
-/* =========================================================
-   RENDER SCORES
-   ========================================================= */
-
-function renderScores(
-  events
-) {
-
-  const grid =
-    document.getElementById(
-      "scores-grid"
-    );
-
-
-  if (!grid) {
-    return;
-  }
-
-
-  if (!events.length) {
-
-    grid.innerHTML = `
-      <div class="empty">
-        No scores available
-        for the selected
-        competition.
-      </div>
-    `;
-
-    return;
-  }
-
-
-  const groups =
-    groupScoresByLeague(
-      events
-    );
-
-
-  if (!groups.size) {
-
-    grid.innerHTML = `
-      <div class="empty">
-        No scores available
-        for the selected
-        competition.
-      </div>
-    `;
-
-    return;
-  }
-
-
-  const orderedGroups =
-    [
-      ...groups.entries()
-    ]
-      .sort(
-        (a, b) =>
-          leagueOrder(
-            a[0]
-          ) -
-          leagueOrder(
-            b[0]
-          )
-      );
-
-
-  let html = "";
-
-
-  orderedGroups.forEach(
-    ([leagueId, matches]) => {
-
-      const league =
-        LEAGUES.find(
-          item =>
-            Number(
-              item.id
-            ) ===
-            Number(
-              leagueId
-            )
-        );
-
-
-      const leagueName =
-        league?.name ||
-        matches[0]?.league ||
-        "Football";
-
-
-      const dates =
-        matches
-          .map(
-            match =>
-              new Date(
-                match.date || 0
-              )
-          )
-          .filter(
-            date =>
-              !Number.isNaN(
-                date.getTime()
-              )
-          )
-          .sort(
-            (a, b) =>
-              b.getTime() -
-              a.getTime()
-          );
-
-
-      const latestDate =
-        dates.length
-          ? dates[0]
-          : null;
-
-
-      matches.sort(
-        (a, b) =>
-          new Date(
-            a.date || 0
-          ) -
-          new Date(
-            b.date || 0
-          )
-      );
-
-
-      html +=
-        scoreLeagueHeading(
-          leagueName,
-          latestDate
-        );
-
-
-      html +=
-        matches
-          .map(
-            scoreCard
-          )
-          .join("");
-
-    }
-  );
-
-
-  grid.innerHTML =
-    html;
-}
-
-
-/* =========================================================
-   LOAD SCORES
-   ========================================================= */
 
 async function loadScores() {
+  try {
+    state.scores = await api("/api/scores");
+    renderScores();
+  } catch (error) {
+    console.error("YepFootball scores:", error);
+    if (!state.scores) {
+      $("scores-grid").innerHTML = `<div class="empty">Scores could not be loaded. They will retry automatically in a minute.</div>`;
+      $("scores-status").textContent = "Scores unavailable";
+      $("ticker").innerHTML = `<span class="ticker-empty">Scores unavailable right now.</span>`;
+    }
+  }
+  scheduleScores();
+}
 
-  const grid =
-    document.getElementById(
-      "scores-grid"
-    );
+let scoresTimer = null;
+function scheduleScores() {
+  clearTimeout(scoresTimer);
+  const anyLive = allScoreMatches().some(isLive);
+  scoresTimer = setTimeout(() => {
+    if (document.visibilityState === "visible") loadScores();
+    else scheduleScores();
+  }, anyLive ? 45000 : 120000);
+}
 
+/* ---------------- Ticker ---------------- */
 
-  const status =
-    document.getElementById(
-      "scores-status"
-    );
+function renderTicker(matches) {
+  const track = $("ticker");
+  if (!track) return;
 
+  const items = matches
+    .slice()
+    .sort((a, b) => {
+      if (isLive(a) !== isLive(b)) return isLive(a) ? -1 : 1;
+      return (toDate(b.date) || 0) - (toDate(a.date) || 0);
+    })
+    .slice(0, 24);
 
-  if (!grid) {
+  if (!items.length) {
+    track.innerHTML = `<span class="ticker-empty">No recent scores yet.</span>`;
     return;
   }
 
+  track.innerHTML = items
+    .map(m => {
+      const league = LEAGUE_BY_ID.get(Number(m.leagueId));
+      const live = isLive(m);
+      return `
+        <a class="tick${live ? " is-live" : ""}" href="#scores">
+          <span class="t-meta">${live ? '<span class="live-dot" aria-hidden="true"></span>' : ""}${esc(league?.short || m.league)} · ${esc(statusLabel(m))}</span>
+          <span class="t-name">${esc(teamName(m.homeTeam))}</span><span class="t-goals">${esc(m.homeScore ?? "–")}</span>
+          <span class="t-name">${esc(teamName(m.awayTeam))}</span><span class="t-goals">${esc(m.awayScore ?? "–")}</span>
+        </a>`;
+    })
+    .join("");
+}
 
-  try {
+/* ---------------- Featured match (hero scoreboard) ---------------- */
 
-    if (status) {
+function renderFeatured(matches) {
+  const box = $("hero-match");
+  if (!box) return;
 
-      status.textContent =
-        "Loading…";
-    }
+  const priority = id => { const i = LEAGUES.findIndex(l => l.id === Number(id)); return i < 0 ? 99 : i; };
+  const goals = m => (Number(m.homeScore) || 0) + (Number(m.awayScore) || 0);
 
+  const live = matches.filter(isLive).sort((a, b) => priority(a.leagueId) - priority(b.leagueId));
+  let pick = live[0];
 
-    const data =
-      await fetchJSON(
-        "/api/scores"
-      );
-
-
-    if (
-      data &&
-      data.ok === false
-    ) {
-
-      throw new Error(
-        data.error ||
-        "Scores API error"
-      );
-    }
-
-
-    let events = [];
-
-
-    /*
-     * Latest available scores.
-     */
-
-    if (
-      Array.isArray(
-        data.latestAvailable
-      ) &&
-      data.latestAvailable.length
-    ) {
-
-      events =
-        data.latestAvailable;
-
-    }
-
-
-    /*
-     * Standard events.
-     */
-
-    else if (
-      Array.isArray(
-        data.events
-      )
-    ) {
-
-      events =
-        data.events;
-    }
-
-
-    /*
-     * Finished fallback.
-     */
-
-    else if (
-      Array.isArray(
-        data.finished
-      )
-    ) {
-
-      events =
-        data.finished;
-    }
-
-
-    /*
-     * Only use supported
-     * YepFootball competitions.
-     */
-
-    events =
-      events.filter(
-        match =>
-          SCORE_LEAGUE_IDS.has(
-            Number(
-              match?.leagueId
-            )
-          )
-      );
-
-
-    /*
-     * Selected competition.
-     */
-
-    if (
-      currentLeague !== null
-    ) {
-
-      events =
-        events.filter(
-          match =>
-            Number(
-              match?.leagueId
-            ) ===
-            currentLeague
-        );
-    }
-
-
-    renderScores(
-      events
-    );
-
-
-    if (status) {
-
-      status.textContent =
-        `${events.length} ${
-          events.length === 1
-            ? "match"
-            : "matches"
-        }`;
-    }
-
-
-  } catch (error) {
-
-    console.error(
-      "YepFootball scores:",
-      error
-    );
-
-
-    grid.innerHTML = `
-      <div class="empty">
-        Unable to load scores.
-      </div>
-    `;
-
-
-    if (status) {
-
-      status.textContent =
-        "Scores unavailable";
-    }
+  if (!pick) {
+    // Most recent day with results, then the top competition, then the most goals.
+    const finished = matches.filter(isFinished);
+    const newest = finished.map(m => toDate(m.date)).filter(Boolean).sort((a, b) => b - a)[0];
+    pick = finished
+      .filter(m => newest && dayKey(toDate(m.date) || new Date(0)) === dayKey(newest))
+      .sort((a, b) => priority(a.leagueId) - priority(b.leagueId) || goals(b) - goals(a))[0];
   }
+
+  if (!pick) {
+    box.innerHTML = `
+      <div class="sb-head"><span>Featured match</span></div>
+      <div class="sb-body sb-loading"><span class="sb-digits">– : –</span></div>
+      <div class="sb-foot">The next result will appear here.</div>`;
+    return;
+  }
+
+  const league = LEAGUE_BY_ID.get(Number(pick.leagueId));
+  const liveNow = isLive(pick);
+  const date = toDate(pick.date);
+
+  box.innerHTML = `
+    <div class="sb-head">
+      <span>${esc(league?.name || pick.league)}</span>
+      <span class="sb-state${liveNow ? " live" : ""}">
+        ${liveNow ? '<span class="live-dot" aria-hidden="true"></span>' : ""}${esc(liveNow ? statusLabel(pick) : "Full time")}
+      </span>
+    </div>
+    <div class="sb-body">
+      <div class="sb-team">${crest(pick.homeTeam)}<strong>${esc(teamName(pick.homeTeam))}</strong></div>
+      <div class="sb-digits">${esc(pick.homeScore ?? "–")}:${esc(pick.awayScore ?? "–")}</div>
+      <div class="sb-team">${crest(pick.awayTeam)}<strong>${esc(teamName(pick.awayTeam))}</strong></div>
+    </div>
+    <div class="sb-foot">${liveNow ? "In play now" : date ? `${esc(relativeDay(date))}, ${esc(fmtTime.format(date))} kick-off` : ""}</div>`;
 }
 
+/* ---------------- Fixtures ---------------- */
 
-/* =========================================================
-   FIXTURE CARD
-   ========================================================= */
+function renderFixtures() {
+  const grid = $("fixtures-grid");
+  const more = $("fixtures-more");
 
-function fixtureCard(
-  match
-) {
+  renderChips($("fixture-tabs"), leagueOptions(state.fixtures), state.fixturesLeague, value => {
+    state.fixturesLeague = value;
+    state.fixturesShown = FIXTURES_PAGE;
+    renderFixtures();
+  });
 
-  const home =
-    match.homeTeam || {};
+  const filtered = state.fixturesLeague == null
+    ? state.fixtures
+    : state.fixtures.filter(m => Number(m.leagueId) === state.fixturesLeague);
 
+  if (!filtered.length) {
+    grid.innerHTML = `<div class="empty">No fixtures scheduled for this competition in the next few weeks.</div>`;
+    more.hidden = true;
+    return;
+  }
 
-  const away =
-    match.awayTeam || {};
+  const shown = filtered.slice(0, state.fixturesShown);
+  const days = new Map();
+  shown.forEach(m => {
+    const d = toDate(m.date);
+    const key = d ? dayKey(d) : "tbc";
+    if (!days.has(key)) days.set(key, { date: d, matches: [] });
+    days.get(key).matches.push(m);
+  });
 
+  grid.innerHTML = [...days.values()]
+    .map(({ date, matches }) => `
+      <article class="day-block">
+        <header class="block-head">
+          <h3>${esc(date ? relativeDay(date) : "Date to be confirmed")}</h3>
+          <small>${date && ["Today", "Tomorrow"].includes(relativeDay(date)) ? `${esc(fmtDay.format(date))} · ` : ""}${matches.length} ${matches.length === 1 ? "match" : "matches"}</small>
+        </header>
+        <ul class="match-list">${matches.map(m => matchRow(m, { showLeague: state.fixturesLeague == null })).join("")}</ul>
+      </article>`)
+    .join("");
 
-  const homeName =
-    home.shortName ||
-    home.name ||
-    "Home";
-
-
-  const awayName =
-    away.shortName ||
-    away.name ||
-    "Away";
-
-
-  return `
-    <article class="fixture-card">
-
-      <div class="fixture-top">
-
-        <span>
-          ${escapeHTML(
-            match.league || ""
-          )}
-        </span>
-
-        <span>
-          ${escapeHTML(
-            formatDate(
-              match.date
-            )
-          )}
-        </span>
-
-      </div>
-
-
-      <div class="fixture-time">
-
-        ${escapeHTML(
-          formatTime(
-            match.date
-          )
-        )}
-
-      </div>
-
-
-      <div class="fixture-teams">
-
-
-        <div class="fixture-team">
-
-          ${
-            home.crest
-              ? `
-                <img
-                  src="${escapeHTML(
-                    home.crest
-                  )}"
-                  alt=""
-                  loading="lazy"
-                >
-              `
-              : `
-                <span class="team-badge">
-                  ⚽
-                </span>
-              `
-          }
-
-          <strong>
-            ${escapeHTML(
-              homeName
-            )}
-          </strong>
-
-        </div>
-
-
-        <div class="vs">
-          VS
-        </div>
-
-
-        <div class="fixture-team">
-
-          ${
-            away.crest
-              ? `
-                <img
-                  src="${escapeHTML(
-                    away.crest
-                  )}"
-                  alt=""
-                  loading="lazy"
-                >
-              `
-              : `
-                <span class="team-badge">
-                  ⚽
-                </span>
-              `
-          }
-
-          <strong>
-            ${escapeHTML(
-              awayName
-            )}
-          </strong>
-
-        </div>
-
-      </div>
-
-    </article>
-  `;
+  more.hidden = filtered.length <= state.fixturesShown;
 }
-
-
-/* =========================================================
-   LOAD FIXTURES
-   ========================================================= */
 
 async function loadFixtures() {
-
-  const grid =
-    document.getElementById(
-      "fixtures-grid"
-    );
-
-
-  if (!grid) {
-    return;
-  }
-
-
-  const message =
-    document.getElementById(
-      "fixtures-message"
-    );
-
-
-  const windowElement =
-    document.getElementById(
-      "fixtures-window"
-    );
-
-
   try {
+    const data = await api("/api/fixtures-v2");
+    let fixtures = Array.isArray(data.fixtures) && data.fixtures.length
+      ? data.fixtures
+      : Array.isArray(data.events) ? data.events : [];
 
-    grid.innerHTML = `
-      <div class="empty">
-        Loading fixtures…
-      </div>
-    `;
+    state.fixtures = fixtures
+      .filter(m => LEAGUE_BY_ID.has(Number(m.leagueId)))
+      .sort((a, b) => (toDate(a.date) || 0) - (toDate(b.date) || 0));
 
-
-    /*
-     * IMPORTANT:
-     * Use fixtures-v2.
-     */
-
-    const data =
-      await fetchJSON(
-        "/api/fixtures-v2"
-      );
-
-
-    let fixtures =
-      Array.isArray(
-        data.fixtures
-      )
-        ? data.fixtures
-        : [];
-
-
-    /*
-     * Events fallback.
-     */
-
-    if (
-      !fixtures.length &&
-      Array.isArray(
-        data.events
-      )
-    ) {
-
-      fixtures =
-        data.events;
+    const win = $("fixtures-window");
+    if (data.from && data.to) {
+      win.textContent = `${fmtDay.format(new Date(data.from))} – ${fmtDay.format(new Date(data.to))}`;
+    } else {
+      win.textContent = "";
     }
 
+    const msg = $("fixtures-message");
+    msg.textContent = data.message || "";
+    msg.hidden = !data.message;
 
-    fixtures =
-      fixtures.filter(
-        match =>
-          SCORE_LEAGUE_IDS.has(
-            Number(
-              match?.leagueId
-            )
-          )
-      );
-
-
-    fixtures.sort(
-      (a, b) =>
-        new Date(
-          a.date || 0
-        ) -
-        new Date(
-          b.date || 0
-        )
-    );
-
-
-    if (windowElement) {
-
-      if (
-        data.from &&
-        data.to
-      ) {
-
-        windowElement.textContent =
-          `${formatDate(
-            data.from
-          )} – ${formatDate(
-            data.to
-          )}`;
-
-      } else {
-
-        windowElement.textContent =
-          "";
-      }
-    }
-
-
-    if (message) {
-
-      if (data.message) {
-
-        message.textContent =
-          data.message;
-
-        message.style.display =
-          "block";
-
-      } else {
-
-        message.textContent =
-          "";
-
-        message.style.display =
-          "none";
-      }
-    }
-
-
-    if (!fixtures.length) {
-
-      grid.innerHTML = `
-        <div class="empty">
-          ${
-            data.message ||
-            "No upcoming fixtures found."
-          }
-        </div>
-      `;
-
-      return;
-    }
-
-
-    grid.innerHTML =
-      fixtures
-        .map(
-          fixtureCard
-        )
-        .join("");
-
-
+    renderFixtures();
   } catch (error) {
-
-    console.error(
-      "YepFootball fixtures:",
-      error
-    );
-
-
-    grid.innerHTML = `
-      <div class="empty">
-        Unable to load fixtures.
-      </div>
-    `;
-
+    console.error("YepFootball fixtures:", error);
+    $("fixtures-grid").innerHTML = `<div class="empty">Fixtures could not be loaded. They will retry automatically.</div>`;
+    $("fixtures-window").textContent = "";
   }
 }
 
-
-/* =========================================================
-   NEWS CARD
-   ========================================================= */
-
-function newsCard(
-  article
-) {
-
-  const title =
-    article.title ||
-    "Football news";
-
-
-  const description =
-    article.description ||
-    "";
-
-
-  const link =
-    article.link ||
-    "#";
-
-
-  const image =
-    article.image ||
-    "";
-
-
-  return `
-    <article class="news-card">
-
-      ${
-        image
-          ? `
-            <a
-              href="${escapeHTML(
-                link
-              )}"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-
-              <img
-                src="${escapeHTML(
-                  image
-                )}"
-                alt=""
-                loading="lazy"
-              >
-
-            </a>
-          `
-          : ""
-      }
-
-
-      <div class="news-meta">
-        BBC SPORT
-      </div>
-
-
-      <h3>
-
-        <a
-          href="${escapeHTML(
-            link
-          )}"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          ${escapeHTML(
-            title
-          )}
-        </a>
-
-      </h3>
-
-
-      ${
-        description
-          ? `
-            <p>
-              ${escapeHTML(
-                description
-              )}
-            </p>
-          `
-          : ""
-      }
-
-    </article>
-  `;
-}
-
-
-/* =========================================================
-   LOAD NEWS
-   ========================================================= */
+/* ---------------- News ---------------- */
 
 async function loadNews() {
-
-  const grid =
-    document.getElementById(
-      "news-grid"
-    );
-
-
-  if (!grid) {
-    return;
-  }
-
-
+  const grid = $("news-grid");
   try {
-
-    const data =
-      await fetchJSON(
-        "/api/news"
-      );
-
-
-    const articles =
-      Array.isArray(
-        data.articles
-      )
-        ? data.articles
-        : [];
-
+    const data = await api("/api/news");
+    const articles = (data.articles || data.news || []).filter(a => a.title && (a.link || a.url));
 
     if (!articles.length) {
-
-      grid.innerHTML = `
-        <div class="empty">
-          No news available.
-        </div>
-      `;
-
+      grid.innerHTML = `<div class="empty">No stories right now. News refreshes every 15 minutes.</div>`;
       return;
     }
 
-
-    grid.innerHTML =
-      articles
-        .map(
-          newsCard
-        )
-        .join("");
-
-
-  } catch (error) {
-
-    console.error(
-      "YepFootball news:",
-      error
-    );
-
+    const [lead, ...rest] = articles;
+    const link = a => esc(a.link || a.url);
 
     grid.innerHTML = `
-      <div class="empty">
-        Unable to load news.
-      </div>
-    `;
+      <a class="news-lead" href="${link(lead)}" target="_blank" rel="noopener noreferrer">
+        <div class="img-wrap">${lead.image ? `<img src="${esc(lead.image)}" alt="" loading="lazy">` : ""}</div>
+        <h3>${esc(lead.title)}</h3>
+        ${lead.description ? `<p>${esc(lead.description)}</p>` : ""}
+        <span class="news-time">BBC Sport · ${esc(timeAgo(lead.published))}</span>
+      </a>
+      <ul class="news-list">
+        ${rest.slice(0, 7).map(a => `
+          <li>
+            <a class="news-item" href="${link(a)}" target="_blank" rel="noopener noreferrer">
+              <span>
+                <h3>${esc(a.title)}</h3>
+                <span class="news-time">${esc(timeAgo(a.published))}</span>
+              </span>
+              ${a.image ? `<img src="${esc(a.image)}" alt="" loading="lazy">` : "<span></span>"}
+            </a>
+          </li>`).join("")}
+      </ul>`;
+
+    const updated = toDate(data.updated);
+    $("news-status").textContent = updated ? `Updated ${fmtTime.format(updated)}` : "";
+  } catch (error) {
+    console.error("YepFootball news:", error);
+    grid.innerHTML = `<div class="empty">News could not be loaded. It will retry automatically.</div>`;
   }
 }
 
+/* ---------------- Videos ---------------- */
 
-/* =========================================================
-   VIDEO CATEGORY
-   ========================================================= */
-
-function normaliseVideoCategory(
-  value
-) {
-
-  const text =
-    String(
-      value || ""
-    ).toLowerCase();
-
-
-  if (
-    text.includes("uefa") ||
-    text.includes("champions")
-  ) {
-
-    return "UEFA";
-  }
-
-
-  if (
-    text.includes("premier") ||
-    text.includes("epl")
-  ) {
-
-    return "Premier League";
-  }
-
-
-  if (
-    text.includes("laliga") ||
-    text.includes("la liga")
-  ) {
-
-    return "LaLiga";
-  }
-
-
-  return value ||
-    "Football";
+function normaliseCategory(value) {
+  const v = String(value || "").toLowerCase();
+  if (v.includes("uefa") || v.includes("champions")) return "UEFA";
+  if (v.includes("premier")) return "Premier League";
+  if (v.includes("laliga") || v.includes("la liga")) return "LaLiga";
+  return value || "";
 }
 
-
-/* =========================================================
-   YOUTUBE VIDEO ID
-   ========================================================= */
-
-function getYouTubeVideoId(
-  url
-) {
-
-  if (!url) {
-    return "";
-  }
-
-
-  const text =
-    String(url);
-
-
-  /*
-   * YouTube watch URL
-   */
-
-  const watchMatch =
-    text.match(
-      /[?&]v=([^&]+)/i
-    );
-
-
-  if (watchMatch) {
-
-    return watchMatch[1];
-  }
-
-
-  /*
-   * YouTube short URL
-   */
-
-  const shortMatch =
-    text.match(
-      /youtu\.be\/([^?&/]+)/i
-    );
-
-
-  if (shortMatch) {
-
-    return shortMatch[1];
-  }
-
-
-  /*
-   * YouTube embed URL
-   */
-
-  const embedMatch =
-    text.match(
-      /youtube\.com\/embed\/([^?&/]+)/i
-    );
-
-
-  if (embedMatch) {
-
-    return embedMatch[1];
-  }
-
-
-  return "";
-}
-
-
-/* =========================================================
-   VIDEO THUMBNAIL
-   ========================================================= */
-
-function getVideoThumbnail(
-  video
-) {
-
-  /*
-   * API supplied thumbnail.
-   */
-
-  if (
-    video.thumbnail
-  ) {
-
-    return video.thumbnail;
-  }
-
-
-  if (
-    video.thumbnailUrl
-  ) {
-
-    return video.thumbnailUrl;
-  }
-
-
-  if (
-    video.image
-  ) {
-
-    return video.image;
-  }
-
-
-  /*
-   * Video ID.
-   */
-
-  let videoId =
-    video.videoId ||
-    video.youtubeId ||
-    "";
-
-
-  /*
-   * Extract from URL.
-   */
-
-  if (!videoId) {
-
-    videoId =
-      getYouTubeVideoId(
-        video.url ||
-        video.link ||
-        video.videoUrl ||
-        ""
-      );
-  }
-
-
-  /*
-   * Standard YouTube
-   * thumbnail.
-   */
-
-  if (videoId) {
-
-    return `
-      https://i.ytimg.com/vi/${
-        encodeURIComponent(
-          videoId
-        )
-      }/hqdefault.jpg
-    `;
-  }
-
-
-  return "";
-}
-
-
-/* =========================================================
-   VIDEO URL
-   ========================================================= */
-
-/* =========================================================
-   VIDEO URL
-   ========================================================= */
-
-function getVideoURL(
-  video
-) {
-
-  const category =
-    normaliseVideoCategory(
-      video.category ||
-      video.source ||
-      video.competition
-    );
-
-
-  /*
-   * UEFA videos:
-   * always open the official UEFA
-   * YouTube channel.
-   */
-  if (
-    category === "UEFA"
-  ) {
-
-    return "https://www.youtube.com/@uefa";
-  }
-
-
-  /*
-   * Premier League and LaLiga:
-   * use the actual video URL supplied
-   * by the API.
-   */
-
-  if (
-    video.url
-  ) {
-
-    return video.url;
-  }
-
-
-  if (
-    video.link
-  ) {
-
-    return video.link;
-  }
-
-
-  if (
-    video.videoUrl
-  ) {
-
-    return video.videoUrl;
-  }
-
-
-  if (
-    video.videoId
-  ) {
-
-    return `
-      https://www.youtube.com/watch?v=${
-        encodeURIComponent(
-          video.videoId
-        )
-      }
-    `;
-  }
-
-
-  if (
-    video.youtubeId
-  ) {
-
-    return `
-      https://www.youtube.com/watch?v=${
-        encodeURIComponent(
-          video.youtubeId
-        )
-      }
-    `;
-  }
-
-
-  return "#";
-}
-
-/* =========================================================
-   VIDEO CARD
-   ========================================================= */
-function videoCard(video) {
-
-  const category = normaliseVideoCategory(
-    video.category ||
-    video.source ||
-    video.competition
-  );
-
-  /*
-   * UEFA must always open the official UEFA YouTube channel.
-   */
-  const url =
-    category === "UEFA"
-      ? "https://www.youtube.com/@uefa"
-      : (
-          video.url ||
-          video.videoURL ||
-          video.videoUrl ||
-          video.link ||
-          (
-            video.videoId
-              ? `https://www.youtube.com/watch?v=${encodeURIComponent(video.videoId)}`
-              : "#"
-          )
-        );
-
-  const thumbnail = getVideoThumbnail(video);
-
-  const title =
-    video.title ||
-    "Football video";
-
-  const source =
-    video.source ||
-    category ||
-    "Football";
-
-  const published =
-    video.published ||
-    video.updated ||
-    "";
+const PLAY_ICON = `<span class="play" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 1.5v13L14 8z"/></svg></span>`;
+
+function videoCard(v) {
+  const category = normaliseCategory(v.category || v.source);
+  const id = v.videoId || v.id;
+  const url = v.url || v.videoURL || `https://www.youtube.com/watch?v=${encodeURIComponent(id)}`;
+  const thumb = v.thumbnail || v.image || (id ? `https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg` : "");
+  const title = v.title || "Football video";
+  const external = OPEN_ON_YOUTUBE.has(category) || !id;
+
+  const media = external
+    ? `<a class="video-thumb" href="${esc(url)}" target="_blank" rel="noopener noreferrer" aria-label="Watch on YouTube: ${esc(title)}">
+         ${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : ""}${PLAY_ICON}
+       </a>`
+    : `<button type="button" class="video-thumb" data-video-id="${esc(id)}" aria-label="Play: ${esc(title)}">
+         ${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : ""}${PLAY_ICON}
+       </button>`;
 
   return `
     <article class="video-card">
-
-      <a
-        class="video-image"
-        href="${url}"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-
-        ${
-          thumbnail
-            ? `
-              <img
-                src="${thumbnail}"
-                alt="${escapeHTML(title)}"
-                loading="lazy"
-              >
-            `
-            : `
-              <div class="video-placeholder">
-                ▶
-              </div>
-            `
-        }
-
-        <span class="video-play">▶</span>
-
-      </a>
-
-      <div class="video-content">
-
-        <div class="video-meta">
-          ${escapeHTML(source)}
-        </div>
-
-        <h3>
-          <a
-            href="${url}"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            ${escapeHTML(title)}
-          </a>
-        </h3>
-
-        ${
-          published
-            ? `
-              <small>
-                ${escapeHTML(formatDate(published))}
-              </small>
-            `
-            : ""
-        }
-
+      ${media}
+      <div class="video-info">
+        <small>${esc(category)} · ${esc(timeAgo(v.published))}</small>
+        <strong>${esc(title)}</strong>
       </div>
-
-    </article>
-  `;
+    </article>`;
 }
 
-/* =========================================================
-   VIDEO TABS
-   ========================================================= */
-
-function renderVideoSectionHeader() {
-
-  const container =
-    document.getElementById(
-      "video-tabs"
-    );
-
-
-  if (!container) {
-    return;
-  }
-
-
-  container.innerHTML = `
-
-    <button
-      type="button"
-      class="video-tab active"
-      data-video-category="ALL"
-    >
-      All
-    </button>
-
-
-    <button
-      type="button"
-      class="video-tab"
-      data-video-category="UEFA"
-    >
-      UEFA
-    </button>
-
-
-    <button
-      type="button"
-      class="video-tab"
-      data-video-category="Premier League"
-    >
-      Premier League
-    </button>
-
-
-    <button
-      type="button"
-      class="video-tab"
-      data-video-category="LaLiga"
-    >
-      LaLiga
-    </button>
-
-  `;
-
-
-  container
-    .querySelectorAll(
-      ".video-tab"
-    )
-    .forEach(
-      button => {
-
-        button.addEventListener(
-          "click",
-          () => {
-
-            container
-              .querySelectorAll(
-                ".video-tab"
-              )
-              .forEach(
-                tab =>
-                  tab.classList.remove(
-                    "active"
-                  )
-              );
-
-
-            button.classList.add(
-              "active"
-            );
-
-
-            filterVideos(
-              button.dataset
-                .videoCategory
-            );
-
-          }
-        );
-      }
-    );
-}
-
-
-/* =========================================================
-   FILTER VIDEOS
-   ========================================================= */
-
-function filterVideos(
-  category
-) {
-
-  const grid =
-    document.getElementById(
-      "videos-grid"
-    ) ||
-    document.getElementById(
-      "video-grid"
-    );
-
-
-  if (!grid) {
-    return;
-  }
-
-
-  let videos =
-    allVideos;
-
-
-  if (
-    category &&
-    category !== "ALL"
-  ) {
-
-    videos =
-      allVideos.filter(
-        video =>
-          normaliseVideoCategory(
-            video.category ||
-            video.source ||
-            video.competition
-          ) ===
-          category
-      );
-  }
-
-
-  if (!videos.length) {
-
-    grid.innerHTML = `
-      <div class="empty">
-        No videos available.
-      </div>
-    `;
-
-    return;
-  }
-
-
-  grid.innerHTML =
-    videos
-      .map(
-        videoCard
-      )
-      .join("");
-}
-
-
-/* =========================================================
-   LOAD VIDEOS
-   ========================================================= */
-
-async function loadVideos() {
-
-  const grid =
-    document.getElementById(
-      "videos-grid"
-    ) ||
-    document.getElementById(
-      "video-grid"
-    );
-
-
-  if (!grid) {
-    return;
-  }
-
-
-  try {
-
-    grid.innerHTML = `
-      <div class="empty">
-        Loading latest videos…
-      </div>
-    `;
-
-
-    /*
-     * YepFootball video API.
-     */
-
-    const data =
-      await fetchJSON(
-        "/api/videos"
-      );
-
-
-    /*
-     * Accept several possible
-     * API response structures.
-     */
-
-    if (
-      Array.isArray(
-        data.videos
-      )
-    ) {
-
-      allVideos =
-        data.videos;
-
-    }
-
-    else if (
-      Array.isArray(
-        data.items
-      )
-    ) {
-
-      allVideos =
-        data.items;
-
-    }
-
-    else if (
-      Array.isArray(
-        data.results
-      )
-    ) {
-
-      allVideos =
-        data.results;
-
-    }
-
-    else {
-
-      allVideos = [];
-    }
-
-
-    /*
-     * Only requested competitions.
-     */
-
-    allVideos =
-      allVideos.filter(
-        video =>
-          VIDEO_CATEGORIES.includes(
-            normaliseVideoCategory(
-              video.category ||
-              video.source ||
-              video.competition
-            )
-          )
-      );
-
-
-    /*
-     * Sort newest first.
-     */
-
-    allVideos.sort(
-      (a, b) => {
-
-        const dateA =
-          new Date(
-            a.published ||
-            a.pubDate ||
-            a.date ||
-            0
-          ).getTime();
-
-
-        const dateB =
-          new Date(
-            b.published ||
-            b.pubDate ||
-            b.date ||
-            0
-          ).getTime();
-
-
-        return dateB -
-          dateA;
-      }
-    );
-
-
-    /*
-     * Keep two latest videos
-     * for each competition.
-     */
-
-    const selected = [];
-
-
-    VIDEO_CATEGORIES.forEach(
-      category => {
-
-        const categoryVideos =
-          allVideos
-            .filter(
-              video =>
-                normaliseVideoCategory(
-                  video.category ||
-                  video.source ||
-                  video.competition
-                ) ===
-                category
-            )
-            .slice(
-              0,
-              2
-            );
-
-
-        selected.push(
-          ...categoryVideos
-        );
-
-      }
-    );
-
-
-    /*
-     * Sort the six selected
-     * videos by publication date.
-     */
-
-    selected.sort(
-      (a, b) => {
-
-        const dateA =
-          new Date(
-            a.published ||
-            a.pubDate ||
-            a.date ||
-            0
-          ).getTime();
-
-
-        const dateB =
-          new Date(
-            b.published ||
-            b.pubDate ||
-            b.date ||
-            0
-          ).getTime();
-
-
-        return dateB -
-          dateA;
-      }
-    );
-
-
-    allVideos =
-      selected;
-
-
-    /*
-     * Create category tabs.
-     */
-
-    renderVideoSectionHeader();
-
-
-    /*
-     * Display all videos.
-     */
-
-    filterVideos(
-      "ALL"
-    );
-
-
-  } catch (error) {
-
-    console.error(
-      "YepFootball videos:",
-      error
-    );
-
-
-    grid.innerHTML = `
-      <div class="empty">
-        Latest videos are
-        temporarily unavailable.
-      </div>
-    `;
-  }
-}
-
-
-/* =========================================================
-   INITIALISE
-   ========================================================= */
-
-function initYepFootball() {
-
-  updateYear();
-
-  renderLeagueTabs();
-
-  loadScores();
-
-  loadFixtures();
-
-  loadNews();
-
-  loadVideos();
-}
-
-
-/* =========================================================
-   START
-   ========================================================= */
-
-if (
-  document.readyState ===
-  "loading"
-) {
-
-  document.addEventListener(
-    "DOMContentLoaded",
-    initYepFootball
+function renderVideos() {
+  const grid = $("videos-grid");
+  const available = VIDEO_CATEGORIES.filter(c => state.videos.some(v => normaliseCategory(v.category || v.source) === c));
+
+  renderChips(
+    $("video-tabs"),
+    [{ value: "ALL", label: "All" }, ...available.map(c => ({ value: c, label: c }))],
+    state.videoCategory,
+    value => { state.videoCategory = value || "ALL"; renderVideos(); }
   );
 
-} else {
+  const list = state.videoCategory === "ALL"
+    ? state.videos.slice(0, 6)
+    : state.videos.filter(v => normaliseCategory(v.category || v.source) === state.videoCategory).slice(0, 6);
 
-  initYepFootball();
+  grid.innerHTML = list.length
+    ? list.map(videoCard).join("")
+    : `<div class="empty">No videos from this channel right now.</div>`;
 }
 
+async function loadVideos() {
+  try {
+    const data = await api("/api/videos");
+    const videos = (data.videos || data.items || data.results || [])
+      .filter(v => VIDEO_CATEGORIES.includes(normaliseCategory(v.category || v.source)))
+      .sort((a, b) => (toDate(b.published) || 0) - (toDate(a.published) || 0));
 
-/* =========================================================
-   AUTOMATIC REFRESH
-   ========================================================= */
+    if (!videos.length) return; // keep the static channel links
 
+    // Two newest per channel for "All", everything for channel filters.
+    const mixed = [];
+    VIDEO_CATEGORIES.forEach(c =>
+      mixed.push(...videos.filter(v => normaliseCategory(v.category || v.source) === c).slice(0, 2))
+    );
+    mixed.sort((a, b) => (toDate(b.published) || 0) - (toDate(a.published) || 0));
+    const ids = new Set(mixed.map(v => v.videoId || v.id));
 
-/*
- * Scores:
- * every 2 minutes.
- */
+    state.videos = [...mixed, ...videos.filter(v => !ids.has(v.videoId || v.id))];
+    renderVideos();
+  } catch (error) {
+    console.warn("YepFootball videos:", error);
+  }
+}
 
-setInterval(
-  () => {
+// Inline playback: swap the thumbnail for a privacy-enhanced player.
+document.addEventListener("click", event => {
+  const button = event.target.closest("button.video-thumb[data-video-id]");
+  if (!button) return;
+  const id = encodeURIComponent(button.dataset.videoId);
+  const frame = document.createElement("iframe");
+  frame.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
+  frame.title = button.getAttribute("aria-label") || "Video player";
+  frame.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture";
+  frame.allowFullscreen = true;
+  const wrap = document.createElement("div");
+  wrap.className = "video-thumb";
+  wrap.appendChild(frame);
+  button.replaceWith(wrap);
+});
 
-    loadScores();
+// Replace any crest that fails to load with the team's initials.
+document.addEventListener("error", event => {
+  const img = event.target;
+  if (!(img instanceof HTMLImageElement)) return;
+  if (img.dataset.initials == null) { img.classList.add("img-failed"); return; }
+  const span = document.createElement("span");
+  span.className = "crest-fallback";
+  span.setAttribute("aria-hidden", "true");
+  span.textContent = img.dataset.initials;
+  img.replaceWith(span);
+}, true);
 
-  },
-  2 * 60 * 1000
-);
+/* ---------------- Start ---------------- */
 
+function init() {
+  $("year").textContent = new Date().getFullYear();
+  renderHeroDate();
 
-/*
- * Fixtures:
- * every 15 minutes.
- */
+  $("fixtures-more").addEventListener("click", () => {
+    state.fixturesShown += FIXTURES_PAGE;
+    renderFixtures();
+  });
 
-setInterval(
-  () => {
+  loadScores();
+  loadBriefing();
+  loadFixtures();
+  loadNews();
+  loadVideos();
 
-    loadFixtures();
+  setInterval(() => document.visibilityState === "visible" && loadFixtures(), 15 * 60 * 1000);
+  setInterval(() => document.visibilityState === "visible" && loadNews(), 15 * 60 * 1000);
+  setInterval(() => document.visibilityState === "visible" && loadBriefing(), 15 * 60 * 1000);
+  setInterval(() => document.visibilityState === "visible" && loadVideos(), 30 * 60 * 1000);
 
-  },
-  15 * 60 * 1000
-);
+  // Refresh straight away when someone returns to the tab.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") loadScores();
+  });
+}
 
-
-/*
- * BBC News:
- * every 30 minutes.
- */
-
-setInterval(
-  () => {
-
-    loadNews();
-
-  },
-  30 * 60 * 1000
-);
-
-
-/*
- * Videos:
- * every 30 minutes.
- */
-
-setInterval(
-  () => {
-
-    loadVideos();
-
-  },
-  30 * 60 * 1000
-);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
+}
